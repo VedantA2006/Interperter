@@ -69,7 +69,7 @@ export class Lexer {
     // //@version=6; they should not become Illegal tokens.
     if (this.ch === '/' && this.peekChar() === '/') {
       this.skipComment();
-      if (this.ch === '\n' || this.ch === '\r') this.readChar();
+      if ((this.ch as string | null) === '\n' || (this.ch as string | null) === '\r') this.readChar();
       return this.nextToken();
     }
 
@@ -322,10 +322,11 @@ export class Lexer {
     while (this.ch !== null && this.ch !== quote) {
       if (this.ch === '\\') {
         this.readChar();
-        if (this.ch === 'n') result += '\n';
-        else if (this.ch === 'r') result += '\r';
-        else if (this.ch === 't') result += '\t';
-        else result += this.ch; // covers \\, \", \' etc.
+        const escCh = this.ch as string | null;
+        if (escCh === 'n') result += '\n';
+        else if (escCh === 'r') result += '\r';
+        else if (escCh === 't') result += '\t';
+        else result += escCh; // covers \\, \", \' etc.
       } else {
         result += this.ch;
       }

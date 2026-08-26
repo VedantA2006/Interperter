@@ -203,13 +203,9 @@ export function Chart({
     // Preserve and restore logical range if user was scrolled back
     if (logicalRangeRef.current && prevDataLengthRef.current > 0) {
       const prevRange = logicalRangeRef.current;
-      // If the right-most visible bar was less than the last bar of the PREVIOUS data, they scrolled back.
-      const wasScrolledBack = prevRange.to < prevDataLengthRef.current - 2;
-      
-      // In replay mode, we specifically want to prevent auto-scrolling to the new candle if they explicitly scrolled back.
-      if (wasScrolledBack || !isReplayActive) {
-        chart.timeScale().setVisibleLogicalRange(prevRange);
-      }
+      // Replay must never recenter when a new candle is revealed. Restoring the
+      // range also retains the chart's existing normal-mode pan/zoom behaviour.
+      chart.timeScale().setVisibleLogicalRange(prevRange);
     }
 
     // Trade entries and exits are displayed by the position-box SVG overlay.
@@ -316,7 +312,14 @@ export function Chart({
           if (!el) return;
           
           const x1 = timeScale.timeToCoordinate(toSec(box.entryTime) as Time);
-          const x2 = timeScale.timeToCoordinate(toSec(box.exitTime) as Time);
+          const exitX = timeScale.timeToCoordinate(toSec(box.exitTime) as Time);
+          // A replay only contains candles revealed so far. For an open trade,
+          // its known exit is still outside that data, so draw the box through
+          // the current replay candle until the real exit candle appears.
+          const replayEndX = isReplayActive && data.length > 0
+            ? timeScale.timeToCoordinate(toSec(data[data.length - 1].time) as Time)
+            : null;
+          const x2 = exitX ?? replayEndX;
           const y1 = series.priceToCoordinate(box.entryPrice);
           const tpPrice = box.tp ?? box.exitPrice;
           const slPrice = box.sl ?? box.exitPrice;
@@ -577,7 +580,15 @@ export function Chart({
           <div 
             style={{ padding: '8px 16px', cursor: 'pointer', color: '#d1d4dc', fontSize: '13px', fontFamily: "'Inter', sans-serif" }}
             onClick={() => {
-               chartRef.current?.timeScale().fitContent();
+               if (data && data.length > 0) {
+                 const targetIndex = data.length - 1;
+                 chartRef.current?.timeScale().setVisibleLogicalRange({
+                   from: Math.max(0, targetIndex - 150),
+                   to: targetIndex + 5
+                 });
+               } else {
+                 chartRef.current?.timeScale().fitContent();
+               }
                setContextMenu(null);
             }}
             onMouseEnter={e => e.currentTarget.style.backgroundColor = '#2a2e39'}
@@ -590,6 +601,7 @@ export function Chart({
       
       {/* SVG Overlay for Boxes, Lines, Labels */}
       <svg
+        ref={svgRef}
         width={overlaySize.w} 
         height={overlaySize.h} 
         style={{
