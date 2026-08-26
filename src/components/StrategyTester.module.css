@@ -1,0 +1,167 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: #1e222d;
+}
+
+/* ── Metrics ── */
+.metricsGrid {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #2a2e39;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.metricCard {
+  padding: 6px 16px;
+  border-right: 1px solid #2a2e39;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.metricTitle {
+  font-size: 0.62rem;
+  color: #787b86;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.metricValue {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #d1d4dc;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.metricSub {
+  font-size: 0.65rem;
+  font-weight: 500;
+  opacity: 0.7;
+}
+
+.positive { color: #26a69a !important; }
+.negative { color: #ef5350 !important; }
+
+/* ── Trade list header ── */
+.tradeListHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  border-bottom: 1px solid #2a2e39;
+  flex-shrink: 0;
+}
+
+.tradeListTitle {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #787b86;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.csvBtn {
+  background: transparent;
+  border: 1px solid #363a45;
+  color: #787b86;
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.csvBtn:hover {
+  border-color: #2962ff;
+  color: #d1d4dc;
+}
+
+/* ── Trade table ── */
+.tradeList {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.noTrades {
+  padding: 20px 16px;
+  color: #787b86;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.tradeTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.68rem;
+}
+
+.tradeTable th {
+  padding: 4px 8px;
+  text-align: left;
+  border-bottom: 1px solid #2a2e39;
+  color: #787b86;
+  font-weight: 600;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  position: sticky;
+  top: 0;
+  background: #1e222d;
+  z-index: 1;
+  white-space: nowrap;
+}
+
+.tradeTable td {
+  padding: 3px 8px;
+  border-bottom: 1px solid rgba(42,46,57,0.5);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.rowWin td { background: rgba(38,166,154,0.04); }
+.rowLoss td { background: rgba(239,83,80,0.04); }
+.tradeTable tr:hover td { background: rgba(255,255,255,0.03); }
+
+.directionLong {
+  color: #26a69a;
+  font-weight: 700;
+  font-size: 0.65rem;
+}
+
+.directionShort {
+  color: #ef5350;
+  font-weight: 700;
+  font-size: 0.65rem;
+}
+
+.pnlPositive { color: #26a69a; font-weight: 600; }
+.pnlNegative { color: #ef5350; font-weight: 600; }
+
+.timeCell {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: #787b86;
+}
+
+.priceCell {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.emptyState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #787b86;
+  font-size: 0.78rem;
+}
