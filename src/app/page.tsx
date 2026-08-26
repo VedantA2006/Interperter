@@ -499,7 +499,6 @@ export default function Home() {
   const [code, setCode] = useState(DEFAULT_CODE);
   const [isBacktesting, setIsBacktesting] = useState(false);
   const [chartData, setChartData] = useState<any[]>([]);
-  const [trades, setTrades] = useState<any[]>([]);
   const [tradeBoxes, setTradeBoxes] = useState<any[]>([]);
   const [indicatorSeries, setIndicatorSeries] = useState<Record<string, (number | null)[]>>({});
   const [metrics, setMetrics] = useState<BacktestMetrics | null>(null);
@@ -598,10 +597,6 @@ export default function Home() {
     }
   }
 
-  const visibleTrades = isReplayActive && visibleLastTimestamp 
-    ? trades.filter(t => (typeof t.time === 'string' ? new Date(t.time).getTime() : t.time * 1000) <= visibleLastTimestamp)
-    : trades;
-    
   const visibleBoxes = isReplayActive && visibleLastTimestamp
     ? tradeBoxes.filter(b => new Date(b.entryTime).getTime() <= visibleLastTimestamp) // only show if entry has happened
     : tradeBoxes;
@@ -708,12 +703,9 @@ export default function Home() {
         setLastBar(data.bars[data.bars.length - 1]);
       }
 
-      // Trade markers
-      const mappedTrades: any[] = [];
+      // Trade position boxes
       const mappedBoxes: any[] = [];
       data.metrics.trades.forEach((t: any) => {
-        mappedTrades.push({ time: t.entryTime, type: t.direction === 'long' ? 'buy' : 'sell', price: t.entryPrice });
-        mappedTrades.push({ time: t.exitTime, type: t.direction === 'long' ? 'sell' : 'buy', price: t.exitPrice });
         mappedBoxes.push({
           entryTime: t.entryTime,
           exitTime: t.exitTime,
@@ -725,7 +717,6 @@ export default function Home() {
           pnl: t.pnl,
         });
       });
-      setTrades(mappedTrades);
       setTradeBoxes(mappedBoxes);
       setShowTester(true);
       setActiveBottomTab('tester');
@@ -760,7 +751,6 @@ export default function Home() {
         if (data.bars) {
           setChartData(data.bars);
           setDatasetInfo(data.datasetInfo);
-          setTrades([]);
           setTradeBoxes([]);
           setDrawings(null);
           setIndicatorSeries({});
@@ -910,7 +900,7 @@ export default function Home() {
           <button className={styles.sideBtn} title="Text" onClick={() => alert('Drawing tools coming soon')}><IconText /></button>
           <div style={{ flex: 1 }} />
           <button className={styles.sideBtn} title="Magnet Mode" onClick={() => alert('Magnet Mode coming soon')}><IconMagnet /></button>
-          <button className={styles.sideBtn} title="Remove Drawings" onClick={() => { setDrawings(null); setTradeBoxes([]); setTrades([]); setUserDrawings([]); }}><IconTrash /></button>
+          <button className={styles.sideBtn} title="Remove Drawings" onClick={() => { setDrawings(null); setTradeBoxes([]); setUserDrawings([]); }}><IconTrash /></button>
         </div>
 
         {/* Chart + bottom panels */}
@@ -961,7 +951,6 @@ export default function Home() {
               <>
                 <Chart 
                   data={visibleChartData} 
-                  trades={visibleTrades}
                   tradeBoxes={visibleBoxes}
                   drawings={visibleDrawings} 
                   userDrawings={userDrawings}
@@ -1125,10 +1114,9 @@ export default function Home() {
             <div style={{ padding: '16px 8px 8px', color: '#787b86', fontSize: '0.75rem', fontWeight: 600, letterSpacing: '0.5px' }}>MY SCRIPTS</div>
             <div className={styles.indicatorItem}>
               <span>Active Pine Script</span>
-              {Object.keys(indicatorSeries).length > 0 || trades.length > 0 ? (
+              {Object.keys(indicatorSeries).length > 0 || tradeBoxes.length > 0 ? (
                 <button className={styles.indicatorRemoveBtn} onClick={() => {
                   setIndicatorSeries({});
-                  setTrades([]);
                   setTradeBoxes([]);
                   setDrawings(null);
                 }}>Remove</button>

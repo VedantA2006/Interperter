@@ -90,7 +90,8 @@ export class BacktestEngine {
     this.trades = [];
     this.equityCurve = [];
 
-    const lexer = new Lexer(sourceCode);
+    const pineSource = sourceCode.replace(/\/\/[^\r\n]*/g, '').trimStart();
+    const lexer = new Lexer(pineSource);
     const parser = new Parser(lexer);
     const ast = parser.parseProgram();
 

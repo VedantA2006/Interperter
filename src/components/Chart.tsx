@@ -4,7 +4,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   createChart,
-  createSeriesMarkers,
   ColorType,
   IChartApi,
   ISeriesApi,
@@ -33,12 +32,6 @@ export interface DatasetInfo {
   data_hash?: string;
 }
 
-export interface TradeMark {
-  time: number;
-  type: 'buy' | 'sell';
-  price: number;
-}
-
 export interface TradeBox {
   entryTime: number;
   exitTime: number;
@@ -52,7 +45,6 @@ export interface TradeBox {
 
 interface ChartProps {
   data: ChartData[];
-  trades?: TradeMark[];
   tradeBoxes?: TradeBox[];
   indicatorSeries?: Record<string, (number | null)[]>;
   datasetInfo?: DatasetInfo;
@@ -71,7 +63,7 @@ const INDICATOR_COLORS = [
 ];
 
 export function Chart({ 
-  data, trades = [], tradeBoxes = [], indicatorSeries = {}, datasetInfo, 
+  data, tradeBoxes = [], indicatorSeries = {}, datasetInfo,
   timeRangeTrigger, goToTimestamp, drawings, isReplayActive, replayIndex, onSelectReplayBar,
   activeDrawingTool, userDrawings = [], setUserDrawings
 }: ChartProps) {
@@ -79,11 +71,8 @@ export function Chart({
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
-  const markersPluginRef = useRef<any>(null);
   const updateOverlaysRef = useRef<(() => void) | null>(null);
-  const tradesRef = useRef(trades);
   const tradeBoxesRef = useRef(tradeBoxes);
-  tradesRef.current = trades;
   tradeBoxesRef.current = tradeBoxes;
   
   // Custom interactive state
@@ -176,12 +165,6 @@ export function Chart({
       .map(d => ({ ...d, time: toSec(d.time) as Time }))
       .sort((a, b) => (a.time as number) - (b.time as number));
 
-    // ── Trade markers (arrows) via createSeriesMarkers ───────────────────────
-    if (markersPluginRef.current) {
-      try { markersPluginRef.current.detach?.(); } catch(e) {}
-      markersPluginRef.current = null;
-    }
-
     candleSeries.setData(formattedCandles);
 
 
@@ -229,7 +212,7 @@ export function Chart({
       }
     }
 
-    // Price lines skipped for large trade counts (markers suffice)
+    // Trade entries and exits are displayed by the position-box SVG overlay.
 
     // ── Custom Drawings Overlay ──────────────────────────────────────────────
     const updateOverlays = () => {
@@ -355,12 +338,14 @@ export function Chart({
               tpRect.setAttribute('y', String(tpTop));
               tpRect.setAttribute('width', String(width));
               tpRect.setAttribute('height', String(tpHeight));
+              tpRect.style.display = 'block';
             }
             if (slRect) {
               slRect.setAttribute('x', String(left));
               slRect.setAttribute('y', String(slTop));
               slRect.setAttribute('width', String(width));
               slRect.setAttribute('height', String(slHeight));
+              slRect.style.display = 'block';
             }
             el.style.display = 'block';
 
@@ -396,29 +381,6 @@ export function Chart({
         });
       }
 
-      // Trade Markers
-      if (tradesRef.current && tradesRef.current.length > 0) {
-        const recentTrades = tradesRef.current.length > 500 ? tradesRef.current.slice(-500) : tradesRef.current;
-        let drawnCount = 0;
-        
-        recentTrades.forEach((t, idx) => {
-          const el = document.getElementById(`trade-marker-${idx}`);
-          if (!el) return;
-          const x = timeScale.timeToCoordinate(toSec(t.time) as Time);
-          const y = series.priceToCoordinate(t.price);
-          if (x !== null && y !== null) {
-            const dy = t.type === 'buy' ? 15 : -15;
-            el.setAttribute('x', String(x));
-            el.setAttribute('y', String(y + dy));
-            el.style.display = 'block';
-            drawnCount++;
-          } else {
-            el.style.display = 'none';
-          }
-        });
-        
-        console.log(`SVG Trade Markers: drew ${drawnCount}/${recentTrades.length}`);
-      }
     };
 
     updateOverlaysRef.current = updateOverlays;
@@ -461,48 +423,17 @@ export function Chart({
   }, [data.length, null, null, null, null, null, null]);
 
   useEffect(() => {
-    const frame = requestAnimationFrame(() => updateOverlaysRef.current?.());
+    const frame = requestAnimationFrame(() => {
+      if (chartContainerRef.current) {
+        setOverlaySize({
+          w: chartContainerRef.current.clientWidth,
+          h: chartContainerRef.current.clientHeight,
+        });
+      }
+      updateOverlaysRef.current?.();
+    });
     return () => cancelAnimationFrame(frame);
-  }, [trades, tradeBoxes]);
-
-  // ── Update trade markers when trades change (without recreating chart) ──────
-  useEffect(() => {
-    if (!seriesRef.current || !data.length || !trades.length) return;
-    const toSec = (t: number | string) =>
-      typeof t === 'number' ? (t > 1e10 ? Math.floor(t / 1000) : t) : Math.floor(Date.parse(t as string) / 1000);
-    
-    const dataTimes = new Set(data.map(d => toSec(d.time) as number));
-    const seenTimes = new Set<number>();
-    const markers = trades
-      .slice(-500)
-      .map(t => ({
-        time: toSec(t.time) as Time,
-        position: t.type === 'buy' ? 'belowBar' as const : 'aboveBar' as const,
-        color: t.type === 'buy' ? '#26a69a' : '#ef5350',
-        shape: t.type === 'buy' ? 'arrowUp' as const : 'arrowDown' as const,
-        text: t.type === 'buy' ? '▲' : '▼',
-        size: 1,
-      }))
-      .filter(m => {
-        const tNum = m.time as number;
-        if (!dataTimes.has(tNum)) return false;
-        if (seenTimes.has(tNum)) return false;
-        seenTimes.add(tNum);
-        return true;
-      })
-      .sort((a, b) => (a.time as number) - (b.time as number));
-    
-    // Detach old markers plugin if present
-    if (markersPluginRef.current) {
-      try { markersPluginRef.current.detach?.(); } catch(e) {}
-      markersPluginRef.current = null;
-    }
-    
-    if (markers.length > 0) {
-      markersPluginRef.current = createSeriesMarkers(seriesRef.current, markers);
-      console.log(`[Markers] Updated: ${markers.length} markers applied`);
-    }
-  }, [trades, data]);
+  }, [tradeBoxes]);
 
   // Handle time range buttons
   useEffect(() => {
@@ -881,7 +812,6 @@ export function Chart({
           })}
         </g>
 
-        {/* Trade Markers are rendered by createSeriesMarkers plugin directly on the chart canvas */}
       </svg>
     </div>
   );

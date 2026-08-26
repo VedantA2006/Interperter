@@ -69,6 +69,7 @@ export class Lexer {
     // //@version=6; they should not become Illegal tokens.
     if (this.ch === '/' && this.peekChar() === '/') {
       this.skipComment();
+      if (this.ch === '\n' || this.ch === '\r') this.readChar();
       return this.nextToken();
     }
 

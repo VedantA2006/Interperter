@@ -18,11 +18,12 @@ export function PineEditor({ value, onChange, readOnly = false }: PineEditorProp
       // Monaco editor frequently throws generic objects or "cancelation" errors
       if (typeof event.reason === 'object' && !(event.reason instanceof Error)) {
         event.preventDefault();
+        event.stopImmediatePropagation();
         console.warn('Suppressed Monaco Editor unhandled rejection:', event.reason);
       }
     };
-    window.addEventListener('unhandledrejection', handleUnhandledRejection);
-    return () => window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection, true);
+    return () => window.removeEventListener('unhandledrejection', handleUnhandledRejection, true);
   }, []);
   
   useEffect(() => {

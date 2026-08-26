@@ -213,7 +213,10 @@ export class Interpreter {
         env.set('alertcondition', () => null);
     }
     
-    env.set('barstate', { islast: barIndex === this.bars.length - 1 });
+    env.set('barstate', {
+      isconfirmed: true,
+      islast: barIndex === this.bars.length - 1,
+    });
     env.set('bar_index', barIndex);
 
     this.eval(this.program, env);
