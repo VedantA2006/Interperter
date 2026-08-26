@@ -1,0 +1,4 @@
+f_trimLiq(float[] lvls, bool[] sw, int maxN) =>
+    while array.size(lvls) > maxN
+        array.shift(lvls)
+        array.shift(sw)

@@ -1,0 +1,37 @@
+indicator("Liquidity Sweep Signals", shorttitle="LSS", overlay=true, max_labels_count=300, max_lines_count=300)
+swingLen = input.int(10, "Swing Length")
+maxLevels = input.int(5, "Max Liq Levels")
+atrMult = input.float(0.5, "SL ATR Buffer")
+rrRatio = input.float(2.0, "R:R Ratio")
+expireBars = input.int(30, "Expire setup after N candles")
+statsLen = input.int(20, "Stats: Last N Signals")
+showDebug = input.bool(true, "Show setup markers")
+sessionLon = input.session("0700-1200", "London Session")
+sessionNY = input.session("1330-2000", "NY Session")
+longCol = input.color(color.new(#26a69a, 0), "Long color")
+shortCol = input.color(color.new(#ef5350, 0), "Short color")
+boxWidth = input.int(30, "Box Width after entry (bars)")
+showMonthlyStats = input.bool(true, "Show Monthly Stats")
+
+var string[] monthKeys = array.new_string()
+var int[] monthWins = array.new_int()
+var int[] monthLosses = array.new_int()
+var float[] monthR = array.new_float()
+
+var int firstBarTime = time
+
+var float currentDrawdown = 0.0
+var float maxDrawdown = 0.0
+var float peakR = 0.0
+var float cumulativeR = 0.0
+
+var float currentConsWinR = 0.0
+var float maxConsWinR = 0.0
+var float currentConsLossR = 0.0
+var float maxConsLossR = 0.0
+
+inLondon = not na(time(timeframe.period, sessionLon))
+inNY = not na(time(timeframe.period, sessionNY))
+inSession = inLondon or inNY
+
+label.new(bar_index, entryP, r_color=color.new(#26a69a, 30), bgcolor=color.new(#f00000, 30), "TP " + str.tostring(tpP, "#.####"), color=color.new(color.white, 20), size=size.small, text_halign=text.align_right, text_valign=text.align_center)
