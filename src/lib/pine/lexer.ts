@@ -8,11 +8,15 @@ const KEYWORDS: Record<string, TokenType> = {
   'while': TokenType.While,
   'break': TokenType.Break,
   'var': TokenType.Var,
+  'varip': TokenType.Var,
   'and': TokenType.And,
   'or': TokenType.Or,
   'not': TokenType.Not,
   'true': TokenType.Boolean,
   'false': TokenType.Boolean,
+  'switch': TokenType.Switch,
+  'return': TokenType.Return,
+  'type': TokenType.Type,
 };
 
 export class Lexer {
@@ -70,6 +74,11 @@ export class Lexer {
     if (this.ch === '/' && this.peekChar() === '/') {
       this.skipComment();
       if ((this.ch as string | null) === '\n' || (this.ch as string | null) === '\r') this.readChar();
+      return this.nextToken();
+    }
+
+    if (this.ch === '/' && this.peekChar() === '*') {
+      this.skipMultilineComment();
       return this.nextToken();
     }
 
@@ -145,10 +154,16 @@ export class Lexer {
           tok = this.createToken(TokenType.Multiply, this.ch);
         }
         break;
+      case '%':
+        tok = this.createToken(TokenType.Modulo, this.ch);
+        break;
       case '/':
         if (this.peekChar() === '/') {
           this.skipComment();
           // After a comment, we might be at a newline or EOF. Just recurse.
+          return this.nextToken();
+        } else if (this.peekChar() === '*') {
+          this.skipMultilineComment();
           return this.nextToken();
         } else if (this.peekChar() === '=') {
           const ch = this.ch;
@@ -205,7 +220,7 @@ export class Lexer {
         tok = this.createToken(TokenType.Question, this.ch);
         break;
       case '#':
-        tok = this.createToken(TokenType.String, this.readHexColor());
+        tok = this.createToken(TokenType.HexColor, this.readHexColor());
         return tok;
       case '"':
       case "'":
@@ -294,6 +309,19 @@ export class Lexer {
 
   private skipComment() {
     while (this.ch !== null && this.ch !== '\n' && this.ch !== '\r') {
+      this.readChar();
+    }
+  }
+
+  private skipMultilineComment() {
+    this.readChar(); // consume '/'
+    this.readChar(); // consume '*'
+    while (this.ch !== null) {
+      if (this.ch === '*' && this.peekChar() === '/') {
+        this.readChar(); // consume '*'
+        this.readChar(); // consume '/'
+        break;
+      }
       this.readChar();
     }
   }

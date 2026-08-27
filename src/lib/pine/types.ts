@@ -16,12 +16,17 @@ export enum TokenType {
   And = 'And',
   Or = 'Or',
   Not = 'Not',
+  Type = 'Type',
+  Switch = 'Switch',
+  Return = 'Return',
+  HexColor = 'HexColor',
 
   // Operators
   Plus = 'Plus', // +
   Minus = 'Minus', // -
   Multiply = 'Multiply', // *
   Divide = 'Divide', // /
+  Modulo = 'Modulo', // %
   Assign = 'Assign', // =
   Reassign = 'Reassign', // :=
   PlusAssign = 'PlusAssign', // +=
@@ -79,6 +84,11 @@ export type Statement =
   | ForStatement
   | WhileStatement
   | BreakStatement
+  | SwitchStatement
+  | ReturnStatement
+  | TupleAssignment
+  | TupleDeclaration
+  | TypeDeclaration
   | FunctionDeclaration;
 
 export interface VariableDeclaration {
@@ -87,6 +97,7 @@ export interface VariableDeclaration {
   value: Expression;
   varType?: Identifier;
   isArrayType?: boolean;
+  isVar?: boolean;
 }
 
 export interface Assignment {
@@ -136,6 +147,36 @@ export interface FunctionDeclaration {
   identifier: Identifier;
   parameters: Identifier[];
   body: BlockStatement;
+}
+
+export interface TypeDeclaration {
+  type: 'TypeDeclaration';
+  identifier: Identifier;
+  fields: { typeIdent?: Identifier; identifier: Identifier; defaultValue?: Expression }[];
+}
+
+export interface SwitchStatement {
+  type: 'SwitchStatement';
+  expression?: Expression;
+  cases: { condition?: Expression; consequence: BlockStatement }[];
+  defaultCase?: BlockStatement;
+}
+
+export interface ReturnStatement {
+  type: 'ReturnStatement';
+  argument?: Expression;
+}
+
+export interface TupleAssignment {
+  type: 'TupleAssignment';
+  identifiers: Identifier[];
+  value: Expression;
+}
+
+export interface TupleDeclaration {
+  type: 'TupleDeclaration';
+  identifiers: Identifier[];
+  value: Expression;
 }
 
 // Expressions

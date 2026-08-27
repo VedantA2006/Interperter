@@ -1,8 +1,12 @@
-// @ts-nocheck
-import { google } from '@ai-sdk/google';
+import { createOpenAI } from '@ai-sdk/openai';
 import { streamText, tool } from 'ai';
 import { AITools } from '@/lib/ai/tools';
 import { z } from 'zod';
+
+const omniroute = createOpenAI({
+  baseURL: 'http://localhost:20128/v1',
+  apiKey: 'sk-66f9c133a5ec1bf0-db8fba-ea45293c',
+});
 
 // Allow streaming responses up to 30 seconds
 export const maxDuration = 30;
@@ -12,7 +16,7 @@ export async function POST(req: Request) {
     const { messages } = await req.json();
 
     const result = streamText({
-      model: google('gemini-1.5-pro'),
+      model: omniroute('auto'),
       system: `You are an autonomous quantitative research agent. 
       You write trading strategies in a custom Pine-style language.
       You MUST follow this rigorous scientific loop:

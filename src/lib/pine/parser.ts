@@ -20,7 +20,10 @@ import {
   Literal,
   TernaryExpression,
   WhileStatement,
-  BreakStatement
+  BreakStatement,
+  ReturnStatement,
+  SwitchStatement,
+  TypeDeclaration
 } from './types';
 
 enum Precedence {
@@ -40,6 +43,11 @@ enum Precedence {
 
 const PRECEDENCES: Partial<Record<TokenType, Precedence>> = {
   [TokenType.Assign]: Precedence.ASSIGN,
+  [TokenType.Reassign]: Precedence.ASSIGN,
+  [TokenType.PlusAssign]: Precedence.ASSIGN,
+  [TokenType.MinusAssign]: Precedence.ASSIGN,
+  [TokenType.MultiplyAssign]: Precedence.ASSIGN,
+  [TokenType.DivideAssign]: Precedence.ASSIGN,
   [TokenType.Arrow]: Precedence.ASSIGN,
   [TokenType.And]: Precedence.LOGICAL,
   [TokenType.Or]: Precedence.LOGICAL,
@@ -53,6 +61,7 @@ const PRECEDENCES: Partial<Record<TokenType, Precedence>> = {
   [TokenType.Minus]: Precedence.SUM,
   [TokenType.Multiply]: Precedence.PRODUCT,
   [TokenType.Divide]: Precedence.PRODUCT,
+  [TokenType.Modulo]: Precedence.PRODUCT,
   [TokenType.LParen]: Precedence.CALL,
   [TokenType.LBracket]: Precedence.INDEX,
   [TokenType.Dot]: Precedence.MEMBER,
@@ -81,6 +90,7 @@ export class Parser {
     this.registerPrefix(TokenType.Identifier, this.parseIdentifier.bind(this));
     this.registerPrefix(TokenType.Number, this.parseNumberLiteral.bind(this));
     this.registerPrefix(TokenType.String, this.parseStringLiteral.bind(this));
+    this.registerPrefix(TokenType.HexColor, this.parseStringLiteral.bind(this));
     this.registerPrefix(TokenType.Boolean, this.parseBooleanLiteral.bind(this));
     this.registerPrefix(TokenType.Minus, this.parsePrefixExpression.bind(this));
     this.registerPrefix(TokenType.Not, this.parsePrefixExpression.bind(this));
@@ -90,7 +100,13 @@ export class Parser {
     this.registerInfix(TokenType.Minus, this.parseBinaryExpression.bind(this));
     this.registerInfix(TokenType.Multiply, this.parseBinaryExpression.bind(this));
     this.registerInfix(TokenType.Divide, this.parseBinaryExpression.bind(this));
+    this.registerInfix(TokenType.Modulo, this.parseBinaryExpression.bind(this));
     this.registerInfix(TokenType.Assign, this.parseBinaryExpression.bind(this));
+    this.registerInfix(TokenType.Reassign, this.parseBinaryExpression.bind(this));
+    this.registerInfix(TokenType.PlusAssign, this.parseBinaryExpression.bind(this));
+    this.registerInfix(TokenType.MinusAssign, this.parseBinaryExpression.bind(this));
+    this.registerInfix(TokenType.MultiplyAssign, this.parseBinaryExpression.bind(this));
+    this.registerInfix(TokenType.DivideAssign, this.parseBinaryExpression.bind(this));
     this.registerInfix(TokenType.Arrow, this.parseFunctionDeclarationExpr.bind(this));
     this.registerInfix(TokenType.Equals, this.parseBinaryExpression.bind(this));
     this.registerInfix(TokenType.NotEquals, this.parseBinaryExpression.bind(this));
@@ -193,8 +209,16 @@ export class Parser {
     }
 
     switch (this.currentToken.type) {
+      case TokenType.Type:
+        return this.parseTypeDeclaration();
       case TokenType.If:
         return this.parseIfStatement();
+      case TokenType.Switch:
+        return this.parseSwitchStatement();
+      case TokenType.Return:
+        return this.parseReturnStatement();
+      case TokenType.LBracket:
+        return this.parseTupleAssignment();
       case TokenType.For:
         return this.parseForStatement();
       case TokenType.While:
@@ -311,6 +335,97 @@ export class Parser {
     }
     
     return { type: 'IfStatement', condition, consequence, alternative };
+  }
+
+  private parseSwitchStatement(): SwitchStatement | null {
+    this.nextToken(); // consume 'switch'
+    
+    let expression: Expression | undefined;
+    if (this.currentToken.type !== TokenType.Newline && this.currentToken.type !== TokenType.Indent) {
+      const expr = this.parseExpression(Precedence.LOWEST);
+      if (expr) expression = expr;
+    }
+    
+    while (this.peekToken.type === TokenType.Newline) {
+      this.nextToken();
+    }
+    
+    if (!this.expectPeek(TokenType.Indent)) return null;
+    
+    const cases: { condition?: Expression; consequence: BlockStatement }[] = [];
+    let defaultCase: BlockStatement | undefined;
+    
+    while (this.peekToken.type !== TokenType.Dedent && this.peekToken.type !== TokenType.EOF) {
+      this.nextToken();
+      if (this.currentToken.type === TokenType.Newline || this.currentToken.type === TokenType.Indent) continue;
+      
+      if (this.currentToken.type === TokenType.Arrow) {
+        // default case (=>)
+        this.nextToken();
+        const consequence = this.parseSwitchCaseBlock();
+        defaultCase = consequence;
+      } else {
+        const condition = this.parseExpression(Precedence.ASSIGN);
+        if (this.expectPeek(TokenType.Arrow)) {
+          this.nextToken(); // consume =>
+          const consequence = this.parseSwitchCaseBlock();
+          if (condition) cases.push({ condition, consequence });
+        }
+      }
+    }
+    
+    if (this.peekToken.type === TokenType.Dedent) this.nextToken();
+    
+    return { type: 'SwitchStatement', expression, cases, defaultCase };
+  }
+
+  private parseSwitchCaseBlock(): BlockStatement {
+    // A case block can be inline expression or an indented block
+    if (this.currentToken.type === TokenType.Newline || this.peekToken.type === TokenType.Newline || this.peekToken.type === TokenType.Indent) {
+      return this.parseBlockStatement();
+    }
+    // Inline expression
+    const expr = this.parseExpression(Precedence.LOWEST);
+    return { type: 'BlockStatement', statements: expr ? [{ type: 'ExpressionStatement', expression: expr }] : [] };
+  }
+
+  private parseReturnStatement(): ReturnStatement | null {
+    this.nextToken(); // consume 'return'
+    if (this.currentToken.type === TokenType.Newline || this.currentToken.type === TokenType.EOF || this.currentToken.type === TokenType.Dedent) {
+      return { type: 'ReturnStatement' };
+    }
+    const argument = this.parseExpression(Precedence.LOWEST);
+    return { type: 'ReturnStatement', argument: argument || undefined };
+  }
+
+  private parseTupleAssignment(): Statement | null {
+    this.nextToken(); // consume '['
+    const identifiers: Identifier[] = [];
+    
+    while (this.currentToken.type !== TokenType.RBracket && this.currentToken.type !== TokenType.EOF) {
+      if (this.currentToken.type === TokenType.Identifier) {
+        identifiers.push({ type: 'Identifier', name: this.currentToken.literal });
+      }
+      this.nextToken();
+    }
+    
+    if (this.currentToken.type === TokenType.RBracket) {
+      this.nextToken(); // consume ']'
+    }
+    
+    if ((this.currentToken.type as unknown as TokenType) === TokenType.Assign || (this.currentToken.type as unknown as TokenType) === TokenType.Reassign) {
+      const isReassign = (this.currentToken.type as unknown as TokenType) === TokenType.Reassign;
+      this.nextToken(); // consume '=' or ':='
+      const value = this.parseExpression(Precedence.LOWEST);
+      if (!value) return null;
+      if (isReassign) {
+         return { type: 'TupleAssignment', identifiers, value };
+      }
+      return { type: 'TupleDeclaration', identifiers, value };
+    }
+    
+    this.errors.push(`Expected assignment after tuple declaration at line ${this.currentToken.line}`);
+    return null;
   }
 
   private parseForStatement(): ForStatement | null {
@@ -582,5 +697,87 @@ export class Parser {
 
   private peekError(t: TokenType) {
     this.errors.push(`Expected next token to be ${t}, got ${this.peekToken.type} instead at line ${this.peekToken.line}`);
+  }
+
+  private parseTypeDeclaration(): TypeDeclaration | null {
+    this.nextToken(); // consume 'type'
+    if (this.currentToken.type !== TokenType.Identifier) {
+       this.errors.push(`Expected identifier after type at line ${this.currentToken.line}`);
+       return null;
+    }
+    const identifier = { type: 'Identifier' as const, name: this.currentToken.literal };
+    this.nextToken(); // consume identifier
+    
+    while ((this.currentToken.type as unknown as TokenType) === TokenType.Newline) {
+      this.nextToken();
+    }
+    
+    if ((this.currentToken.type as unknown as TokenType) !== TokenType.Indent) {
+       this.errors.push(`Expected indented block for type declaration at line ${this.currentToken.line}`);
+       return null;
+    }
+    this.nextToken(); // consume Indent
+    
+    const fields: { typeIdent?: Identifier; identifier: Identifier; defaultValue?: Expression }[] = [];
+    
+    while ((this.currentToken.type as unknown as TokenType) !== TokenType.Dedent && (this.currentToken.type as unknown as TokenType) !== TokenType.EOF) {
+      if ((this.currentToken.type as unknown as TokenType) === TokenType.Newline) {
+        this.nextToken();
+        continue;
+      }
+      
+      if ((this.currentToken.type as unknown as TokenType) !== TokenType.Identifier) {
+         this.errors.push(`Expected identifier in type field at line ${this.currentToken.line}`);
+         this.nextToken();
+         continue;
+      }
+      
+      let firstIdent = { type: 'Identifier' as const, name: this.currentToken.literal };
+      this.nextToken();
+      
+      let typeIdent: Identifier | undefined;
+      let fieldIdent: Identifier;
+      
+      if (this.currentToken.type === TokenType.Identifier) {
+         typeIdent = firstIdent;
+         fieldIdent = { type: 'Identifier' as const, name: this.currentToken.literal };
+         this.nextToken();
+      } else if (this.currentToken.type === TokenType.LBracket) {
+         // handle array types e.g. float[] price
+         this.nextToken(); // consume [
+         if (this.currentToken.type as any === TokenType.RBracket) {
+            this.nextToken(); // consume ]
+         }
+         if (this.currentToken.type === TokenType.Identifier) {
+             typeIdent = firstIdent; // we just map 'float' as type identifier
+             fieldIdent = { type: 'Identifier' as const, name: this.currentToken.literal };
+             this.nextToken();
+         } else {
+             fieldIdent = firstIdent;
+         }
+      } else {
+         fieldIdent = firstIdent;
+      }
+      
+      let defaultValue: Expression | undefined;
+      if ((this.currentToken.type as unknown as TokenType) === TokenType.Assign) {
+         this.nextToken(); // consume '='
+         const expr = this.parseExpression(Precedence.LOWEST);
+         if (expr) defaultValue = expr;
+      }
+      
+      fields.push({ typeIdent, identifier: fieldIdent, defaultValue });
+      
+      while ((this.currentToken.type as unknown as TokenType) !== TokenType.Newline && (this.currentToken.type as unknown as TokenType) !== TokenType.Dedent && (this.currentToken.type as unknown as TokenType) !== TokenType.EOF) {
+         this.nextToken();
+      }
+    }
+    
+    // Do not consume Dedent here, let the outer loop's nextToken() handle it
+    // if (this.currentToken.type === TokenType.Dedent) {
+    //   this.nextToken(); 
+    // }
+    
+    return { type: 'TypeDeclaration', identifier, fields };
   }
 }

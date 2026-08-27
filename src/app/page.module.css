@@ -7,8 +7,8 @@
   flex-direction: column;
   height: 100vh;
   width: 100vw;
-  background: #131722;
-  color: #d1d4dc;
+  background: #0b0f14;
+  color: #e7edf4;
   overflow: hidden;
 }
 
@@ -18,8 +18,8 @@
   display: flex;
   align-items: center;
   padding: 0 8px;
-  background: #1e222d;
-  border-bottom: 1px solid #2a2e39;
+  background: #111720;
+  border-bottom: 1px solid #263241;
   gap: 2px;
   flex-shrink: 0;
   z-index: 20;
@@ -44,7 +44,7 @@
   gap: 6px;
   background: none;
   border: none;
-  color: #d1d4dc;
+  color: #e7edf4;
   font-size: 0.82rem;
   font-weight: 700;
   padding: 4px 10px;
@@ -53,6 +53,10 @@
   white-space: nowrap;
 }
 .symbolBtn:hover { background: #2a2e39; }
+
+.brandLogo { display: flex; align-items: center; gap: 7px; padding: 0 8px 0 2px; }
+.brandMark { display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid #4f8cff; color: #77a6ff; font-size: 0.68rem; font-weight: 800; letter-spacing: 0; }
+.brandName { color: #e7edf4; font-size: 0.82rem; font-weight: 700; letter-spacing: 0.02em; }
 
 .tfBtn {
   background: none;
@@ -91,6 +95,17 @@
   color: #2962ff;
 }
 
+.navBtn {
+  color: #8997a8;
+  text-decoration: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+.navBtn:hover { color: #e7edf4; border-color: #263241; background: #171f2a; }
+
 .runBtn {
   display: flex;
   align-items: center;
@@ -117,8 +132,8 @@
   display: flex;
   align-items: center;
   padding: 0 12px;
-  background: #131722;
-  border-bottom: 1px solid #1e222d;
+  background: #0b0f14;
+  border-bottom: 1px solid #1b2531;
   font-size: 0.7rem;
   gap: 8px;
   flex-shrink: 0;
@@ -142,11 +157,39 @@
   position: relative;
 }
 
+.marketPanel {
+  width: 230px;
+  flex-shrink: 0;
+  background: #111720;
+  border-left: 1px solid #263241;
+  padding: 12px 10px;
+  overflow-y: auto;
+}
+.marketPanelHeader { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 12px; color: #8997a8; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.12em; }
+.marketPanelLink { color: #77a6ff; text-decoration: none; font-size: 0.68rem; letter-spacing: 0; }
+.marketPanelSectionTitle { color: #5f7185; font-size: 0.63rem; font-weight: 700; letter-spacing: 0.1em; margin: 12px 4px 6px; text-transform: uppercase; }
+.marketRow, .marketRowActive { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 7px; border: 1px solid transparent; border-radius: 3px; color: #8997a8; text-align: left; }
+.marketRow:hover, .marketRowActive { background: #171f2a; border-color: #263241; color: #e7edf4; }
+.marketRowActive { border-left: 2px solid #4f8cff; }
+.marketRow strong { display: block; color: inherit; font-size: 0.76rem; }
+.marketRow small { display: block; color: #5f7185; font-size: 0.62rem; margin-top: 3px; }
+.marketCount { color: #5f7185; font-family: var(--font-mono); font-size: 0.58rem; }
+.marketEmpty { color: #5f7185; font-size: 0.7rem; padding: 8px 4px; }
+.marketSummary { display: grid; gap: 8px; border-top: 1px solid #263241; padding: 10px 4px; color: #718297; font-size: 0.68rem; }
+.marketSummary span { display: flex; justify-content: space-between; }
+.marketSummary strong { color: #e7edf4; font-family: var(--font-mono); font-size: 0.65rem; }
+.indicatorRow { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 4px; padding: 7px 4px; border-bottom: 1px solid #1b2531; }
+.indicatorName { color: #d8e1eb; font-size: 0.67rem; text-transform: uppercase; }
+.indicatorHide, .indicatorRemove, .showIndicators { color: #718297; font-size: 0.61rem; padding: 2px 4px; }
+.indicatorHide:hover, .showIndicators:hover { color: #77a6ff; }
+.indicatorRemove { color: #f06470; font-size: 0.8rem; }
+.showIndicators { margin: 8px 4px 0; border: 1px solid #263241; width: calc(100% - 8px); }
+
 /* ── Left Sidebar (drawing tools) ────────────────────────── */
 .leftSidebar {
   width: 42px;
-  background: #1e222d;
-  border-right: 1px solid #2a2e39;
+  background: #111720;
+  border-right: 1px solid #263241;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -192,8 +235,8 @@
 
 /* ── Bottom Panels ───────────────────────────────────────── */
 .bottomPanels {
-  border-top: 1px solid #2a2e39;
-  background: #1e222d;
+  border-top: 1px solid #263241;
+  background: #111720;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -393,6 +436,37 @@
   color: #2962ff;
 }
 
+@media (max-width: 900px) {
+  .toolbar { overflow-x: auto; padding: 0 5px; }
+  .toolbarGroup { flex-shrink: 0; }
+  .toolbarDivider { margin: 0 3px; }
+  .toolBtn { padding: 5px 7px; }
+  .toolBtn > svg { width: 16px; height: 16px; }
+  .navBtn { flex-shrink: 0; }
+  .ohlcBar { overflow-x: auto; white-space: nowrap; }
+  .ohlcBar > span:last-child { display: none; }
+  .leftSidebar { width: 36px; }
+  .sideBtn { width: 29px; height: 29px; }
+  .bottomPanels { min-height: 240px; }
+  .metricsGrid { grid-template-columns: repeat(4, minmax(110px, 1fr)); overflow-x: auto; }
+  .marketPanel { width: 190px; }
+}
+
+@media (max-width: 600px) {
+  .brandName { display: none; }
+  .symbolBtn { max-width: 92px; overflow: hidden; }
+  .toolBtn { font-size: 0; gap: 0; padding: 6px; }
+  .toolBtnActive { font-size: 0; padding: 6px; }
+  .runBtn { padding: 5px 9px; font-size: 0; }
+  .runBtn svg { margin: 0; }
+  .bottomPanels { min-height: 210px; }
+  .bottomTab { padding: 0 8px; }
+  .marketPanel { display: none; }
+  .modalBackdrop { padding: 12px; }
+  .modalContent { width: calc(100vw - 24px); max-width: calc(100vw - 24px); }
+  .modalInputGroup { grid-template-columns: 1fr; gap: 8px; padding: 14px 12px; }
+}
+
 /* ── Bottom Timeframe Bar ────────────────────────────────── */
 .timeBar {
   height: 26px;
@@ -475,6 +549,37 @@
   display: flex;
   flex-direction: column;
 }
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(3, 7, 12, 0.68);
+  backdrop-filter: blur(4px);
+}
+.modalContent {
+  width: min(420px, 100%);
+  background: #111720;
+  border: 1px solid #344355;
+  border-radius: 6px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+  color: #e7edf4;
+}
+.modalHeader, .modalFooter { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; }
+.modalHeader { border-bottom: 1px solid #263241; font-size: 0.84rem; font-weight: 700; }
+.modalClose { color: #8997a8; padding: 3px 6px; font-size: 1rem; }
+.modalClose:hover { color: #e7edf4; }
+.modalInputGroup { display: grid; grid-template-columns: 1.2fr 1fr; gap: 10px; padding: 20px 16px; }
+.modalInput { width: 100%; min-height: 38px; border: 1px solid #344355; border-radius: 4px; background: #0b0f14; color: #e7edf4; padding: 0 10px; outline: none; color-scheme: dark; }
+.modalInput:focus { border-color: #4f8cff; box-shadow: 0 0 0 2px rgba(79, 140, 255, 0.14); }
+.modalFooter { justify-content: flex-end; gap: 8px; border-top: 1px solid #263241; }
+.modalBtn, .modalBtnPrimary { min-height: 32px; border-radius: 4px; padding: 0 13px; font-size: 0.74rem; font-weight: 700; }
+.modalBtn { color: #8997a8; border: 1px solid #344355; }
+.modalBtn:hover { color: #e7edf4; background: #171f2a; }
+.modalBtnPrimary { color: #fff; background: #4f8cff; }
+.modalBtnPrimary:hover { background: #77a6ff; color: #0b0f14; }
 .indicatorModalHeader {
   padding: 16px;
   border-bottom: 1px solid #363a45;

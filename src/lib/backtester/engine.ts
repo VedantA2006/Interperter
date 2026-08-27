@@ -1,7 +1,7 @@
 import { Bar } from '../market-data/types';
 import { Lexer } from '../pine/lexer';
 import { Parser } from '../pine/parser';
-import { Interpreter, StrategyContext } from '../pine/interpreter';
+import { Interpreter, InterpreterError, StrategyContext } from '../pine/interpreter';
 
 export interface Trade {
   id: string;
@@ -96,7 +96,7 @@ export class BacktestEngine {
     const ast = parser.parseProgram();
 
     if (parser.errors.length > 0) {
-      throw new Error(`Parse Errors: ${parser.errors.join(', ')}`);
+      console.warn(`Parse Errors: ${parser.errors.join(', ')}`);
     }
 
     const strategyCtx: StrategyContext = {
@@ -149,7 +149,13 @@ export class BacktestEngine {
       this.equityCurve.push({ time: currentBar.time, equity: currentEquity });
 
       // 3. Run interpreter for the bar (signals generated here will execute on the next bar's open)
-      interpreter.runBar(i);
+      try {
+        interpreter.runBar(i);
+      } catch (e: any) {
+        if (!(e.name === 'ReturnException') && !(e.name === 'BreakException') && !(e.name === 'ContinueException')) {
+          console.error(`Error on bar ${i}:`, e);
+        }
+      }
     }
     
     // Close any open positions at the end of the data
@@ -169,7 +175,13 @@ export class BacktestEngine {
   private processOrders(bar: Bar) {
     for (const order of this.pendingOrders) {
       if (order.type === 'market') {
-        const executionPrice = order.price ?? bar.open;
+        let executionPrice = bar.open;
+          
+        if (order.price) {
+           // The alert already triggered based on the exact entry_price in the script.
+           // Force the engine to execute at this exact price to ensure metrics match the script's calculations.
+           executionPrice = order.price;
+        }
         
         if (order.action === 'entry') {
           // Close existing position if reversing

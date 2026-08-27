@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import styles from './data-manager.module.css';
 
@@ -77,6 +77,10 @@ export default function DataManager() {
     } catch { setDatasets([]); }
     finally { setIsLoadingDatasets(false); }
   }, []);
+
+  useEffect(() => {
+    loadDatasets();
+  }, [loadDatasets]);
 
   // ── CSV Import state ──────────────────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -210,7 +214,7 @@ export default function DataManager() {
   return (
     <div className={styles.container}>
       <header className={styles.header}>
-        <div className={styles.logo}>AI<span>Pine</span> Platform</div>
+        <Link href="/" className={styles.logo}><span className={styles.logoMark}>PL</span> PineLabs</Link>
         <nav className={styles.nav}>
           <Link href="/" className={styles.navLink}>Terminal</Link>
           <Link href="/lab" className={styles.navLink}>Strategy Lab</Link>

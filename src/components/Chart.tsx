@@ -72,6 +72,7 @@ export function Chart({
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const updateOverlaysRef = useRef<(() => void) | null>(null);
+  const indicatorSeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
   const tradeBoxesRef = useRef(tradeBoxes);
   tradeBoxesRef.current = tradeBoxes;
   
@@ -80,10 +81,77 @@ export function Chart({
   const [drawingPoints, setDrawingPoints] = useState<{ time: number, price: number }[]>([]);
   const [overlaySize, setOverlaySize] = useState({ w: 0, h: 0 });
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number } | null>(null);
+  
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
+  const [dragState, setDragState] = useState<{ id: string, pointIndex?: number, startX: number, startY: number, startPoints: any[] } | null>(null);
 
   // References for preserving state during re-renders
   const logicalRangeRef = useRef<any>(null);
   const prevDataLengthRef = useRef<number>(0);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawingId && setUserDrawings) {
+        setUserDrawings(userDrawings.filter((d: any) => d.id !== selectedDrawingId));
+        setSelectedDrawingId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedDrawingId, userDrawings, setUserDrawings]);
+
+  useEffect(() => {
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!dragState || !chartRef.current || !seriesRef.current || !chartContainerRef.current || !setUserDrawings) return;
+      const rect = chartContainerRef.current.getBoundingClientRect();
+      const currentX = e.clientX - rect.left;
+      const currentY = e.clientY - rect.top;
+      const dx = currentX - dragState.startX;
+      const dy = currentY - dragState.startY;
+      
+      const timeScale = chartRef.current.timeScale();
+      const series = seriesRef.current;
+      
+      const newDrawings = userDrawings.map((draw: any) => {
+        if (draw.id !== dragState.id) return draw;
+        
+        const newPoints = draw.points.map((pt: any, i: number) => {
+          if (dragState.pointIndex !== undefined && dragState.pointIndex !== i) return pt;
+          
+          const startPt = dragState.startPoints[i];
+          const startTimeSec = typeof startPt.time === 'string' ? new Date(startPt.time).getTime() / 1000 : startPt.time / 1000;
+          
+          const origX = timeScale.timeToCoordinate(startTimeSec as Time) ?? currentX;
+          const origY = series.priceToCoordinate(startPt.price) ?? currentY;
+          
+          const targetX = dragState.pointIndex !== undefined ? currentX : origX + dx;
+          const targetY = dragState.pointIndex !== undefined ? currentY : origY + dy;
+          
+          let newTimeSec = timeScale.coordinateToTime(targetX);
+          if (!newTimeSec) newTimeSec = startTimeSec;
+          
+          const newTimeMs = typeof newTimeSec === 'number' ? newTimeSec * 1000 : new Date(newTimeSec as string).getTime();
+          const newPrice = series.coordinateToPrice(targetY) ?? startPt.price;
+          
+          return { time: newTimeMs, price: newPrice };
+        });
+        
+        return { ...draw, points: newPoints };
+      });
+      setUserDrawings(newDrawings);
+    };
+    
+    const handlePointerUp = () => setDragState(null);
+    
+    if (dragState) {
+      window.addEventListener('pointermove', handlePointerMove);
+      window.addEventListener('pointerup', handlePointerUp);
+    }
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [dragState, userDrawings, setUserDrawings]);
 
   useEffect(() => {
     if (!chartContainerRef.current || data.length === 0) return;
@@ -167,38 +235,6 @@ export function Chart({
 
     candleSeries.setData(formattedCandles);
 
-
-    // ── Indicator line series ─────────────────────────────────────────────────
-    const indicatorKeys = Object.keys(indicatorSeries);
-    indicatorKeys.forEach((key, idx) => {
-      const vals = indicatorSeries[key];
-      if (!vals || vals.length === 0) return;
-
-      // Build time-aligned points, skipping nulls
-      const lineData: { time: Time; value: number }[] = [];
-      vals.forEach((v, i) => {
-        if (v === null || v === undefined) return;
-        if (typeof v === 'object' && v.value !== undefined) {
-          lineData.push({ time: toSec(v.time) as Time, value: v.value });
-        } else if (typeof v === 'number') {
-          if (!data[i]) return;
-          lineData.push({ time: toSec(data[i].time) as Time, value: v });
-        }
-      });
-
-      if (lineData.length < 2) return;
-
-      const color = INDICATOR_COLORS[idx % INDICATOR_COLORS.length];
-      const lineSer = chart.addSeries(LineSeries, {
-        color,
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: true,
-        crosshairMarkerVisible: false,
-        title: key.replace('_', ' ').toUpperCase(),
-      });
-      lineSer.setData(lineData);
-    });
 
     // Preserve and restore logical range if user was scrolled back
     if (logicalRangeRef.current && prevDataLengthRef.current > 0) {
@@ -420,10 +456,52 @@ export function Chart({
         logicalRangeRef.current = chartRef.current.timeScale().getVisibleLogicalRange();
         prevDataLengthRef.current = data.length;
       }
+      indicatorSeriesRef.current.clear();
       if (chartRef.current === chart) chartRef.current = null;
       chart.remove();
     };
   }, [data.length, null, null, null, null, null, null]);
+
+  useEffect(() => {
+    if (!chartRef.current || !data.length) return;
+    const chart = chartRef.current;
+    const toSec = (t: number | string) => typeof t === 'number'
+      ? (t > 1e10 ? Math.floor(t / 1000) : t)
+      : Math.floor(Date.parse(t) / 1000);
+    const wanted = new Set(Object.keys(indicatorSeries));
+
+    for (const [key, series] of indicatorSeriesRef.current) {
+      if (!wanted.has(key)) {
+        chart.removeSeries(series);
+        indicatorSeriesRef.current.delete(key);
+      }
+    }
+
+    Object.entries(indicatorSeries).forEach(([key, values], index) => {
+      const lineData = values.flatMap((value: any, valueIndex) => {
+        if (value === null || value === undefined) return [];
+        if (typeof value === 'object' && value.value !== undefined) {
+          return [{ time: toSec(value.time) as Time, value: value.value }];
+        }
+        return data[valueIndex] && typeof value === 'number'
+          ? [{ time: toSec(data[valueIndex].time) as Time, value }]
+          : [];
+      });
+      let series = indicatorSeriesRef.current.get(key);
+      if (!series) {
+        series = chart.addSeries(LineSeries, {
+          color: INDICATOR_COLORS[index % INDICATOR_COLORS.length],
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: true,
+          crosshairMarkerVisible: false,
+          title: key.replace('_', ' ').toUpperCase(),
+        });
+        indicatorSeriesRef.current.set(key, series);
+      }
+      series.setData(lineData);
+    });
+  }, [indicatorSeries, data]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -496,19 +574,22 @@ export function Chart({
       if (activeDrawingTool && price !== null && setUserDrawings) {
         const newPoint = { time: clickTimeMs, price };
         const newPoints = [...drawingPoints, newPoint];
+        const uid = Date.now().toString() + Math.random().toString(36).substring(2, 7);
         
         if (activeDrawingTool === 'hline') {
-          setUserDrawings([...userDrawings, { type: 'hline', points: [newPoint] }]);
+          setUserDrawings([...userDrawings, { id: uid, type: 'hline', points: [newPoint] }]);
           setDrawingPoints([]);
         } else if (activeDrawingTool === 'trendline' && newPoints.length === 2) {
-          setUserDrawings([...userDrawings, { type: 'trendline', points: newPoints }]);
+          setUserDrawings([...userDrawings, { id: uid, type: 'trendline', points: newPoints }]);
           setDrawingPoints([]);
         } else if (activeDrawingTool === 'fib' && newPoints.length === 2) {
-          setUserDrawings([...userDrawings, { type: 'fib', points: newPoints }]);
+          setUserDrawings([...userDrawings, { id: uid, type: 'fib', points: newPoints }]);
           setDrawingPoints([]);
         } else {
           setDrawingPoints(newPoints);
         }
+      } else if (!activeDrawingTool) {
+        setSelectedDrawingId(null);
       }
     };
     
@@ -677,6 +758,37 @@ export function Chart({
           const y1 = seriesRef.current.priceToCoordinate(draw.points[0].price);
           
           if (x1 === null || y1 === null) return null;
+          
+          const isSelected = selectedDrawingId === draw.id;
+
+          const handlePointerDownMain = (e: React.PointerEvent) => {
+            e.stopPropagation();
+            setSelectedDrawingId(draw.id || null);
+            if (chartContainerRef.current) {
+              const rect = chartContainerRef.current.getBoundingClientRect();
+              setDragState({
+                id: draw.id || '',
+                startX: e.clientX - rect.left,
+                startY: e.clientY - rect.top,
+                startPoints: draw.points
+              });
+            }
+          };
+
+          const handlePointerDownPoint = (e: React.PointerEvent, ptIdx: number) => {
+            e.stopPropagation();
+            setSelectedDrawingId(draw.id || null);
+            if (chartContainerRef.current) {
+              const rect = chartContainerRef.current.getBoundingClientRect();
+              setDragState({
+                id: draw.id || '',
+                pointIndex: ptIdx,
+                startX: e.clientX - rect.left,
+                startY: e.clientY - rect.top,
+                startPoints: draw.points
+              });
+            }
+          };
 
           if (draw.type === 'hline') {
             return (
@@ -684,6 +796,13 @@ export function Chart({
                 <line x1={0} y1={y1} x2={overlaySize.w} y2={y1} stroke="#2962ff" strokeWidth="2" />
                 <rect x={0} y={y1 - 10} width={60} height={20} fill="#2962ff" rx="4" />
                 <text x={30} y={y1 + 4} fill="white" fontSize="11px" fontFamily="Inter, sans-serif" textAnchor="middle">{draw.points[0].price.toFixed(2)}</text>
+                
+                {/* Hit Area */}
+                <line x1={0} y1={y1} x2={overlaySize.w} y2={y1} stroke="transparent" strokeWidth="15" pointerEvents="auto" style={{ cursor: 'pointer' }} onPointerDown={handlePointerDownMain} />
+                
+                {isSelected && (
+                   <circle cx={overlaySize.w / 2} cy={y1} r={6} fill="#ffffff" stroke="#2962ff" strokeWidth="2" pointerEvents="auto" style={{ cursor: 'ns-resize' }} onPointerDown={(e) => handlePointerDownPoint(e, 0)} />
+                )}
               </g>
             );
           }
@@ -697,7 +816,21 @@ export function Chart({
           if (x2 === null || y2 === null) return null;
 
           if (draw.type === 'trendline') {
-            return <line key={`ud-${idx}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#2962ff" strokeWidth="2" />;
+            return (
+              <g key={`ud-${idx}`}>
+                <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#2962ff" strokeWidth="2" />
+                
+                {/* Hit Area */}
+                <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth="15" pointerEvents="auto" style={{ cursor: 'pointer' }} onPointerDown={handlePointerDownMain} />
+                
+                {isSelected && (
+                  <>
+                    <circle cx={x1} cy={y1} r={6} fill="#ffffff" stroke="#2962ff" strokeWidth="2" pointerEvents="auto" style={{ cursor: 'move' }} onPointerDown={(e) => handlePointerDownPoint(e, 0)} />
+                    <circle cx={x2} cy={y2} r={6} fill="#ffffff" stroke="#2962ff" strokeWidth="2" pointerEvents="auto" style={{ cursor: 'move' }} onPointerDown={(e) => handlePointerDownPoint(e, 1)} />
+                  </>
+                )}
+              </g>
+            );
           }
           
           if (draw.type === 'fib') {
@@ -713,6 +846,9 @@ export function Chart({
             const low = Math.max(y1, y2);
             const diff = low - high;
             const isDown = draw.points[1].price < draw.points[0].price;
+            
+            const hitAreaTop = Math.min(y1, y2) - 10;
+            const hitAreaHeight = Math.abs(y2 - y1) + 20;
 
             return (
               <g key={`ud-fib-${idx}`}>
@@ -725,6 +861,16 @@ export function Chart({
                     </g>
                   );
                 })}
+                
+                {/* Hit Area */}
+                <rect x={Math.min(x1, x2)} y={hitAreaTop} width={Math.max(100, overlaySize.w - Math.min(x1, x2))} height={hitAreaHeight} fill="transparent" pointerEvents="auto" style={{ cursor: 'pointer' }} onPointerDown={handlePointerDownMain} />
+                
+                {isSelected && (
+                  <>
+                    <circle cx={x1} cy={y1} r={6} fill="#ffffff" stroke="#2962ff" strokeWidth="2" pointerEvents="auto" style={{ cursor: 'move' }} onPointerDown={(e) => handlePointerDownPoint(e, 0)} />
+                    <circle cx={x2} cy={y2} r={6} fill="#ffffff" stroke="#2962ff" strokeWidth="2" pointerEvents="auto" style={{ cursor: 'move' }} onPointerDown={(e) => handlePointerDownPoint(e, 1)} />
+                  </>
+                )}
               </g>
             );
           }

@@ -54,6 +54,23 @@
       "data_path": "data/datasets/xauusd_5m_bid_2026_2026_a8c8c63c.json",
       "quality_status": "VALID",
       "quality_warnings": []
+    },
+    {
+      "id": 3,
+      "dataset_id": "xauusd_5m_bid_2024_2026_c80f7d3d",
+      "symbol": "XAUUSD",
+      "source_name": "dukascopy",
+      "timeframe": "5m",
+      "start_timestamp": 1706482800000,
+      "end_timestamp": 1787788500000,
+      "candle_count": 180962,
+      "imported_at": "2026-08-27T09:22:20.224Z",
+      "data_hash": "c80f7d3d1d706ae6181b90f529b0942d23c1457542e9dea62cfaa433fc50500c",
+      "data_path": "data\\datasets\\xauusd_5m_bid_2024_2026_c80f7d3d.json",
+      "quality_status": "VALID_WITH_WARNINGS",
+      "quality_warnings": [
+        "669 significant data gaps detected (weekend closures excluded)."
+      ]
     }
   ]
 }

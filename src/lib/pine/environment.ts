@@ -34,4 +34,8 @@ export class Environment {
     }
     return false;
   }
+
+  public entries(): IterableIterator<[string, Value]> {
+    return this.store.entries();
+  }
 }

@@ -5,9 +5,13 @@ import { Bar } from '../market-data/types';
 
 export interface StrategyContext {
   position_size: number;
-  entry: (id: string, direction: 'long' | 'short', qty?: number, stop?: number, limit?: number, entryPrice?: number) => void;
+  position_avg_price?: number;
+  equity?: number;
+  netprofit?: number;
+  entry: (id: string, direction: 'long' | 'short', qty?: number, tp?: number, sl?: number, entryPrice?: number) => void;
   close: (id: string) => void;
   exit: (id: string, stop?: number, limit?: number) => void;
+  closeAll: () => void;
   cancel: (id: string) => void;
 }
 
@@ -15,6 +19,15 @@ export class InterpreterError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'InterpreterError';
+  }
+}
+
+class ReturnException extends Error {
+  public value: Value;
+  constructor(value: Value) {
+    super('Return');
+    this.name = 'ReturnException';
+    this.value = value;
   }
 }
 
@@ -30,7 +43,10 @@ export class Interpreter {
   private bars: Bar[];
   private currentBarIndex: number = 0;
   private opsCount: number = 0;
-  private MAX_OPS_PER_BAR = 10000;
+  private MAX_OPS_PER_BAR = 100000;
+  
+  // Series storage for history tracking
+  private seriesStore: Map<string, any[]> = new Map();
   
   // State for built-in functions — keyed by callSite index
   private statefulFunctions: Map<string, any> = new Map();
@@ -38,6 +54,7 @@ export class Interpreter {
   // Per-bar call counter so each ta.sma() call gets a unique stable key
   private smaCallCounter: number = 0;
   private crossCallCounter: number = 0;
+  private plotCallCounter: number = 0;
   
   // Indicator series collected during backtest (exported for chart rendering)
   public indicatorSeries: Map<string, (number | null)[]> = new Map();
@@ -51,11 +68,13 @@ export class Interpreter {
   
   public strategy: StrategyContext;
   public globalEnv: Environment;
+  private mtfData?: Record<string, Bar[]>;
 
-  constructor(program: Program, bars: Bar[], strategyCtx: StrategyContext) {
+  constructor(program: Program, bars: Bar[], strategyCtx: StrategyContext, mtfData?: Record<string, Bar[]>) {
     this.program = program;
     this.bars = bars;
     this.strategy = strategyCtx;
+    this.mtfData = mtfData;
     this.globalEnv = new Environment();
   }
 
@@ -64,6 +83,7 @@ export class Interpreter {
     this.opsCount = 0;
     this.smaCallCounter = 0;
     this.crossCallCounter = 0;
+    this.plotCallCounter = 0;
     
     // We create a new environment for each bar, but initialize it with 
     // the series data for the current bar context.
@@ -111,6 +131,8 @@ export class Interpreter {
           size: (arr: any[]) => arr.length,
           indexof: (arr: any[], val: any) => arr.indexOf(val)
         });
+        
+        env.set('log', (val: any) => console.log('PINE LOG:', val));
         
         env.set('box', { 
           new: (left: any, top: any, right: any, bottom: any, border_color?: any, bgcolor?: any, text?: any, text_color?: any, text_size?: any, text_halign?: any, text_valign?: any) => {
@@ -182,11 +204,10 @@ export class Interpreter {
             if (payload && payload.action) {
                const dir = payload.action.toLowerCase() === 'buy' ? 'long' : (payload.action.toLowerCase() === 'sell' ? 'short' : null);
                console.log('dir:', dir, 'hasStrategy:', !!this.strategy);
-               if (dir && this.strategy) {
-                 // @ts-ignore - tp/sl supported by backtest engine
-                 this.strategy.entry(`webhook_${dir}_${barIndex}`, dir, 1, payload.tp, payload.sl, payload.entry_price);
-                 console.log('called strategy.entry');
-               }
+                if (dir && this.strategy) {
+                  this.strategy.entry(`webhook_${dir}_${barIndex}`, dir, 1, payload.tp, payload.sl, payload.entry_price);
+                  console.log('called strategy.entry');
+                }
             }
           } catch (e) {
             console.log('ALERT PARSE ERROR:', e.message);
@@ -203,14 +224,80 @@ export class Interpreter {
         
         env.set('syminfo', { ticker: 'MOCK_TICKER' });
         env.set('timeframe', { period: '5' });
-        env.set('math', { min: Math.min, max: Math.max });
+        const wrapMath = (fn: Function, args: any[]) => {
+          if (args.some(a => a === null)) return null;
+          return fn(...args);
+        };
+        const wrapMinMax = (fn: Function, args: any[]) => {
+          const valid = args.filter(a => a !== null);
+          return valid.length > 0 ? fn(...valid) : null;
+        };
+
+        env.set('math', {
+          min: (...args: any[]) => wrapMinMax(Math.min, args),
+          max: (...args: any[]) => wrapMinMax(Math.max, args),
+          abs: (x: any) => wrapMath(Math.abs, [x]),
+          floor: (x: any) => wrapMath(Math.floor, [x]),
+          ceil: (x: any) => wrapMath(Math.ceil, [x]),
+          round: (x: any) => wrapMath(Math.round, [x]),
+          sqrt: (x: any) => wrapMath(Math.sqrt, [x]),
+          pow: (x: any, y: any) => wrapMath(Math.pow, [x, y]),
+          log: (x: any) => wrapMath(Math.log, [x]),
+          exp: (x: any) => wrapMath(Math.exp, [x]),
+          sin: (x: any) => wrapMath(Math.sin, [x]),
+          cos: (x: any) => wrapMath(Math.cos, [x]),
+          tan: (x: any) => wrapMath(Math.tan, [x])
+        });
         env.set('year', (t: any) => new Date(t).getFullYear());
         env.set('month', (t: any) => new Date(t).getMonth() + 1);
+        
+        env.set('array', {
+          new_float: (size?: number, def?: number) => new Array(size || 0).fill(def !== undefined ? def : null),
+          new_int: (size?: number, def?: number) => new Array(size || 0).fill(def !== undefined ? def : null),
+          new_color: (size?: number, def?: any) => new Array(size || 0).fill(def !== undefined ? def : null),
+          new_bool: (size?: number, def?: boolean) => new Array(size || 0).fill(def !== undefined ? def : null),
+          new_string: (size?: number, def?: string) => new Array(size || 0).fill(def !== undefined ? def : null),
+          new: (size?: number, def?: any) => new Array(size || 0).fill(def !== undefined ? def : null),
+          push: (arr: any[], val: any) => { if (Array.isArray(arr)) arr.push(val); },
+          pop: (arr: any[]) => Array.isArray(arr) ? arr.pop() : null,
+          shift: (arr: any[]) => Array.isArray(arr) ? arr.shift() : null,
+          unshift: (arr: any[], val: any) => { if (Array.isArray(arr)) arr.unshift(val); },
+          get: (arr: any[], index: number) => Array.isArray(arr) ? arr[index] : null,
+          set: (arr: any[], index: number, val: any) => { if (Array.isArray(arr)) arr[index] = val; },
+          size: (arr: any[]) => Array.isArray(arr) ? arr.length : 0,
+          clear: (arr: any[]) => { if (Array.isArray(arr)) arr.length = 0; },
+          min: (arr: any[]) => Array.isArray(arr) && arr.length ? Math.min(...arr.filter(x => x !== null)) : null,
+          max: (arr: any[]) => Array.isArray(arr) && arr.length ? Math.max(...arr.filter(x => x !== null)) : null,
+          sum: (arr: any[]) => Array.isArray(arr) && arr.length ? arr.reduce((a,b) => a + (b||0), 0) : null,
+          avg: (arr: any[]) => {
+             if (!Array.isArray(arr) || !arr.length) return null;
+             const valid = arr.filter(x => typeof x === 'number');
+             return valid.length ? valid.reduce((a,b) => a + b, 0) / valid.length : null;
+          },
+          indexof: (arr: any[], val: any) => Array.isArray(arr) ? arr.indexOf(val) : -1
+        });
+        
+        env.set('request', {
+          security: (symbol: string, timeframe: string, expression: any) => {
+             // Mocking request.security to avoid crashes by returning the evaluated expression on current timeframe
+             return expression;
+          }
+        });
         
         // Add strategy context object reference
         env.set('strategy', this.strategy as any);
         env.set('indicator', () => null);
         env.set('alertcondition', () => null);
+        env.set('plot', (value: any) => {
+          const key = `plot_${this.plotCallCounter++}`;
+          this.recordIndicator(key, typeof value === 'number' ? value : null);
+          return value;
+        });
+        env.set('plotshape', (condition: any) => {
+          const key = `plotshape_${this.plotCallCounter++}`;
+          this.recordIndicator(key, this.isTruthy(condition) ? 1 : null);
+          return null;
+        });
     }
     
     env.set('barstate', {
@@ -220,6 +307,42 @@ export class Interpreter {
     env.set('bar_index', barIndex);
 
     this.eval(this.program, env);
+    
+    // Sweep environment to record final variable values for this bar's series
+    // Only tracking numbers, strings, bools, and objects (like UDT instances)
+    for (const [key, val] of env.entries()) {
+       if (
+          typeof val === 'number' || 
+          typeof val === 'string' || 
+          typeof val === 'boolean' ||
+          (typeof val === 'object' && val !== null && !Array.isArray(val) && !(val instanceof Date))
+       ) {
+          if (!this.seriesStore.has(key)) {
+             this.seriesStore.set(key, new Array(this.currentBarIndex).fill(null));
+          }
+          const arr = this.seriesStore.get(key)!;
+          while (arr.length <= this.currentBarIndex) arr.push(null);
+          arr[this.currentBarIndex] = val;
+       }
+    }
+    
+    // Also sweep globalEnv to record `var` variables
+    for (const [key, val] of this.globalEnv.entries()) {
+       if (
+          typeof val === 'number' || 
+          typeof val === 'string' || 
+          typeof val === 'boolean' ||
+          (typeof val === 'object' && val !== null && !Array.isArray(val) && !(val instanceof Date))
+       ) {
+          if (!this.seriesStore.has(key)) {
+             this.seriesStore.set(key, new Array(this.currentBarIndex).fill(null));
+          }
+          const arr = this.seriesStore.get(key)!;
+          while (arr.length <= this.currentBarIndex) arr.push(null);
+          arr[this.currentBarIndex] = val;
+       }
+    }
+    
     return env;
   }
 
@@ -282,6 +405,33 @@ export class Interpreter {
       }
       case 'IfStatement':
         return this.evalIfStatement(node as any, env);
+      case 'SwitchStatement':
+        return this.evalSwitchStatement(node as any, env);
+      case 'ReturnStatement':
+        const returnVal = (node as any).argument ? this.eval((node as any).argument, env) : null;
+        throw new ReturnException(returnVal);
+      case 'TupleAssignment':
+      case 'TupleDeclaration': {
+        const identifiers = (node as any).identifiers;
+        const val = this.eval((node as any).value, env) as any[];
+        
+        if (!Array.isArray(val)) {
+          throw new InterpreterError('Tuple assignment requires an array value');
+        }
+        
+        for (let i = 0; i < identifiers.length; i++) {
+          const name = identifiers[i].name;
+          const valItem = i < val.length ? val[i] : null;
+          
+          if (node.type === 'TupleAssignment') {
+            if (!env.update(name, valItem)) env.set(name, valItem);
+            if (this.globalEnv.get(name) !== undefined) this.globalEnv.set(name, valItem);
+          } else {
+            env.set(name, valItem);
+          }
+        }
+        return val;
+      }
       case 'ForStatement':
         return this.evalForStatement(node as any, env);
       case 'WhileStatement':
@@ -304,6 +454,32 @@ export class Interpreter {
         return this.evalArrayAccess(node as any, env);
       case 'TernaryExpression':
         return this.evalTernaryExpression(node as any, env);
+      case 'TypeDeclaration': {
+        const typeName = (node as any).identifier.name;
+        const fields = (node as any).fields;
+        
+        const typeObj = {
+          new: (...args: any[]) => {
+            const instance: any = { _type: typeName };
+            fields.forEach((field: any, i: number) => {
+              const fieldName = field.identifier.name;
+              if (i < args.length && args[i] !== undefined) {
+                 instance[fieldName] = args[i];
+              } else if (field.defaultValue) {
+                 instance[fieldName] = this.eval(field.defaultValue, env);
+              } else {
+                 instance[fieldName] = null;
+              }
+            });
+            return instance;
+          }
+        };
+        env.set(typeName, typeObj);
+        if (this.globalEnv.get(typeName) !== undefined) {
+           this.globalEnv.set(typeName, typeObj);
+        }
+        return null;
+      }
       default:
         throw new InterpreterError(`Unknown node type: ${node.type}`);
     }
@@ -343,6 +519,33 @@ export class Interpreter {
     return null;
   }
 
+  private evalSwitchStatement(node: any, env: Environment): Value {
+    let matchValue: Value = undefined;
+    if (node.expression) {
+       matchValue = this.eval(node.expression, env);
+    }
+    
+    for (const c of node.cases) {
+      if (node.expression) {
+         const caseVal = this.eval(c.condition, env);
+         if (caseVal === matchValue) {
+           return this.evalBlockStatement(c.consequence, env);
+         }
+      } else {
+         const condition = this.eval(c.condition, env);
+         if (this.isTruthy(condition)) {
+           return this.evalBlockStatement(c.consequence, env);
+         }
+      }
+    }
+    
+    if (node.defaultCase) {
+      return this.evalBlockStatement(node.defaultCase, env);
+    }
+    
+    return null;
+  }
+
   private evalTernaryExpression(node: any, env: Environment): Value {
     const condition = this.eval(node.condition, env);
     if (this.isTruthy(condition)) {
@@ -352,13 +555,40 @@ export class Interpreter {
     }
   }
 
+  private evalMemberExpression(node: any, env: Environment): Value {
+    const obj = this.eval(node.object, env) as any;
+    if (!obj) return null;
+    const propName = node.property.name;
+    // In Pine, member access could be a function call wrapper, or direct field access (UDT)
+    if (typeof obj[propName] !== 'undefined') {
+       return obj[propName];
+    }
+    return null;
+  }
+
+  private evalArrayAccess(node: any, env: Environment): Value {
+    const array = this.eval(node.array, env) as any[];
+    const index = this.eval(node.index, env) as number;
+    if (Array.isArray(array) && typeof index === 'number') {
+       return array[index] ?? null;
+    }
+    return null;
+  }
+
   private evalFunctionDeclaration(node: any, env: Environment): Value {
     const func = (...args: any[]) => {
       const funcEnv = new Environment(env);
       node.parameters.forEach((param: any, i: number) => {
         funcEnv.set(param.name, args[i]);
       });
-      return this.evalBlockStatement(node.body, funcEnv);
+      try {
+        return this.evalBlockStatement(node.body, funcEnv);
+      } catch (e: any) {
+        if (e instanceof ReturnException) {
+          return e.value;
+        }
+        throw e;
+      }
     };
     env.set(node.identifier.name, func);
     return null;
@@ -421,16 +651,59 @@ export class Interpreter {
   }
 
   private evalBinaryExpression(node: any, env: Environment): Value {
-    if (node.operator === '=') {
-      return this.eval(node.right, env);
+    if (['=', ':=', '+=', '-=', '*=', '/='].includes(node.operator)) {
+      const rightVal = this.eval(node.right, env) as number | null;
+      let targetVal = rightVal;
+      
+      if (node.operator !== '=' && node.operator !== ':=') {
+         const leftVal = this.eval(node.left, env) as number | null;
+         if (leftVal === null || rightVal === null) targetVal = null;
+         else if (node.operator === '+=') targetVal = leftVal + rightVal;
+         else if (node.operator === '-=') targetVal = leftVal - rightVal;
+         else if (node.operator === '*=') targetVal = leftVal * rightVal;
+         else if (node.operator === '/=') targetVal = rightVal === 0 ? null : leftVal / rightVal;
+      }
+      
+      if (node.left.type === 'Identifier') {
+         const name = node.left.name;
+         if (node.operator === '=') {
+            // let the VariableDeclaration handler deal with = for simple idents, 
+            // except if it parsed as a binary expression (which shouldn't happen for var declarations)
+            return targetVal; 
+         }
+         if (env.update(name, targetVal)) {
+            if (this.globalEnv.get(name) !== undefined) this.globalEnv.set(name, targetVal);
+         } else {
+            env.set(name, targetVal);
+         }
+         return targetVal;
+      } else if (node.left.type === 'MemberExpression') {
+         const obj = this.eval(node.left.object, env) as any;
+         if (obj) obj[node.left.property.name] = targetVal;
+         return targetVal;
+      } else if (node.left.type === 'ArrayAccess') {
+         const arr = this.eval(node.left.array, env) as any[];
+         const idx = this.eval(node.left.index, env) as number;
+         if (Array.isArray(arr) && typeof idx === 'number') arr[idx] = targetVal;
+         return targetVal;
+      }
+      
+      return targetVal;
     }
     
     const left = this.eval(node.left, env);
     const right = this.eval(node.right, env);
 
-    // Null-safe: treat null as 0 for arithmetic, false for logic
-    const L = (left ?? 0) as number;
-    const R = (right ?? 0) as number;
+    if (node.operator === 'and') return this.isTruthy(left) && this.isTruthy(right);
+    if (node.operator === 'or') return this.isTruthy(left) || this.isTruthy(right);
+    if (node.operator === '==') return left === right;
+    if (node.operator === '!=') return left !== right;
+
+    // Propagate na for arithmetic and comparison
+    if (left === null || right === null) return null;
+
+    const L = left as number;
+    const R = right as number;
 
     switch (node.operator) {
       case '+': return L + R;
@@ -442,10 +715,6 @@ export class Interpreter {
       case '>':  return L > R;
       case '<=': return L <= R;
       case '>=': return L >= R;
-      case '==': return left === right;
-      case '!=': return left !== right;
-      case 'and': return this.isTruthy(left) && this.isTruthy(right);
-      case 'or':  return this.isTruthy(left) || this.isTruthy(right);
       default:   return null;
     }
   }
@@ -469,7 +738,59 @@ export class Interpreter {
     if (node.callee.type === 'MemberExpression') {
       const obj = (node.callee.object as any).name;
       const prop = (node.callee.property as any).name;
-      
+      if (obj === 'request' && prop === 'security') {
+          const symbol = this.eval(node.arguments[0], env);
+          const timeframe = this.eval(node.arguments[1], env) as string;
+          
+          if (!this.mtfData || !this.mtfData[timeframe]) {
+              return this.eval(node.arguments[2], env);
+          }
+          
+          const currentTime = this.bars[this.currentBarIndex].time;
+          const mtfBars = this.mtfData[timeframe];
+          
+          let targetIndex = -1;
+          for (let i = 0; i < mtfBars.length; i++) {
+              if (mtfBars[i].time <= currentTime) targetIndex = i;
+              else break;
+          }
+          
+          if (targetIndex === -1) return null;
+          
+          const oldBars = this.bars;
+          const oldIndex = this.currentBarIndex;
+          this.bars = mtfBars;
+          this.currentBarIndex = targetIndex;
+          
+          const mtfBar = mtfBars[targetIndex];
+          const oldOpen = env.get('open');
+          const oldHigh = env.get('high');
+          const oldLow = env.get('low');
+          const oldClose = env.get('close');
+          const oldVol = env.get('volume');
+          const oldTime = env.get('time');
+          
+          env.set('open', mtfBar.open);
+          env.set('high', mtfBar.high);
+          env.set('low', mtfBar.low);
+          env.set('close', mtfBar.close);
+          env.set('volume', mtfBar.volume);
+          env.set('time', mtfBar.time);
+          
+          const result = this.eval(node.arguments[2], env);
+          
+          this.bars = oldBars;
+          this.currentBarIndex = oldIndex;
+          env.set('open', oldOpen);
+          env.set('high', oldHigh);
+          env.set('low', oldLow);
+          env.set('close', oldClose);
+          env.set('volume', oldVol);
+          env.set('time', oldTime);
+          
+          return result;
+      }
+
       const args = node.arguments.map((a: any) => this.eval(a, env));
       
       if (obj === 'ta' && prop === 'sma') {
@@ -490,11 +811,44 @@ export class Interpreter {
         } else if (prop === 'close') {
           strat.close(args[0] as string);
           return null;
+        } else if (prop === 'close_all') {
+          strat.closeAll();
+          return null;
+        } else if (prop === 'exit') {
+          strat.exit(
+              args[0] as string, 
+              args[1] as string, 
+              args[2] as number,
+              args[3] as number,
+              args[4] as number,
+              args[5] as number,
+              args[6] as number
+          );
+          return null;
         }
       } else if (obj === 'ta') {
          if (prop === 'pivothigh') return this.callPivotHigh(args);
          if (prop === 'pivotlow') return this.callPivotLow(args);
          if (prop === 'atr') return this.callAtr(args);
+        if (prop === 'highest') return this.callWindow(args, 'highest');
+        if (prop === 'lowest') return this.callWindow(args, 'lowest');
+        if (prop === 'sum') return this.callWindow(args, 'sum');
+        if (prop === 'change') return this.callChange(args);
+        if (prop === 'macd') return this.callMacd(args);
+        if (prop === 'vwap') return this.callVwap(args);
+        if (prop === 'dev') return this.callDev(args);
+        if (prop === 'variance') return this.callVariance(args);
+        if (prop === 'stdev') return this.callStdev(args);
+        if (prop === 'cci') return this.callCci(args);
+        if (prop === 'tr') return this.callTr(args);
+        if (prop === 'roc') return this.callRoc(args);
+        if (prop === 'wma') return this.callWma(args);
+        if (prop === 'kc') return this.callKc(args);
+        if (prop === 'supertrend') return this.callSupertrend(args);
+        if (prop === 'rma') return this.callRma(args);
+        if (prop === 'hma') return this.callHma(args);
+        if (prop === 'bb') return this.callBb(args);
+        if (prop === 'stoch') return this.callStoch(args);
       }
       
       // Try to get the object from environment
@@ -553,6 +907,11 @@ export class Interpreter {
       if (funcName === 'na') {
         return args[0] === null || args[0] === undefined;
       }
+      if (funcName === 'nz') {
+        const val = args[0];
+        const replacement = args.length > 1 ? args[1] : 0;
+        return (val === null || val === undefined || Number.isNaN(val)) ? replacement : val;
+      }
       
       const func = env.get(funcName);
       if (typeof func === 'function') {
@@ -574,17 +933,33 @@ export class Interpreter {
   }
 
   private evalArrayAccess(node: any, env: Environment): Value {
-    // Handling history access like close[1]
-    const objName = (node.object as any).name;
-    const index = this.eval(node.index, env) as number;
+    // Handling history access like close[1] or x[1]
+    const lookback = this.eval(node.index, env) as number;
+    if (typeof lookback !== 'number' || lookback < 0) return null;
     
-    if (['open', 'high', 'low', 'close', 'volume', 'time'].includes(objName)) {
-      const targetIndex = this.currentBarIndex - index;
-      if (targetIndex < 0) return null; // Or throw error/return NaN depending on preference
-      return (this.bars[targetIndex] as any)[objName];
+    if (node.object.type === 'Identifier') {
+      const objName = node.object.name;
+      
+      // Built-in price series
+      if (['open', 'high', 'low', 'close', 'volume', 'time'].includes(objName)) {
+        const targetIndex = this.currentBarIndex - lookback;
+        if (targetIndex < 0) return null;
+        return (this.bars[targetIndex] as any)[objName];
+      }
+      
+      // User-defined series
+      const historyArr = this.seriesStore.get(objName);
+      if (historyArr) {
+         const targetIndex = this.currentBarIndex - lookback;
+         if (targetIndex < 0) return null;
+         return historyArr[targetIndex] !== undefined ? historyArr[targetIndex] : null;
+      }
+    } else if (node.object.type === 'FunctionCall') {
+       // A robust implementation would use AST IDs. Here we throw a helpful Pine-specific error.
+       throw new InterpreterError(`History operator [] directly on function calls is currently unsupported. Please assign the result to a variable first.`);
     }
     
-    throw new InterpreterError(`Array access only supported for price series`);
+    return null;
   }
 
   private isTruthy(val: Value): boolean {
@@ -709,6 +1084,38 @@ export class Interpreter {
     this.recordIndicator(siteKey, rsi);
     return rsi;
   }
+
+  private callWindow(args: any[], mode: 'highest' | 'lowest' | 'sum'): number | null {
+    const siteKey = `${mode}_${this.smaCallCounter++}`;
+    const value = args[0] as number | null;
+    const period = Math.max(1, Number(args[1] ?? 1));
+    if (!this.statefulFunctions.has(siteKey)) this.statefulFunctions.set(siteKey, { series: [] });
+    const state = this.statefulFunctions.get(siteKey);
+    if (state.series.length <= this.currentBarIndex) state.series.push(value);
+    const values = state.series.slice(-period).filter((item: number | null): item is number => item !== null && item !== undefined);
+    if (values.length < period) {
+      this.recordIndicator(siteKey, null);
+      return null;
+    }
+    const result = mode === 'highest'
+      ? Math.max(...values)
+      : mode === 'lowest'
+        ? Math.min(...values)
+        : values.reduce((total: number, item: number) => total + item, 0);
+    this.recordIndicator(siteKey, result);
+    return result;
+  }
+
+  private callChange(args: any[]): number | null {
+    const siteKey = `change_${this.smaCallCounter++}`;
+    const value = args[0] as number | null;
+    if (!this.statefulFunctions.has(siteKey)) this.statefulFunctions.set(siteKey, { previous: null });
+    const state = this.statefulFunctions.get(siteKey);
+    const result = state.previous === null || value === null ? null : value - state.previous;
+    state.previous = value;
+    this.recordIndicator(siteKey, result);
+    return result;
+  }
   
   private callPivotHigh(args: any[]): number | null {
      const siteKey = `ph_${this.smaCallCounter++}`;
@@ -810,5 +1217,261 @@ export class Interpreter {
      
      state.prevAtr = atr;
      return atr;
+  }
+  
+  private callMacd(args: any[]): [number | null, number | null, number | null] {
+    const src = args[0] as number;
+    const fastLen = (args[1] as number) || 12;
+    const slowLen = (args[2] as number) || 26;
+    const sigLen = (args[3] as number) || 9;
+    
+    const fastEma = this.callEma([src, fastLen]);
+    const slowEma = this.callEma([src, slowLen]);
+    
+    let macd = null;
+    if (fastEma !== null && slowEma !== null) {
+      macd = fastEma - slowEma;
+    }
+    
+    const signal = macd !== null ? this.callEma([macd, sigLen]) : null;
+    const hist = macd !== null && signal !== null ? macd - signal : null;
+    return [macd, signal, hist];
+  }
+
+  private callVwap(args: any[]): number | null {
+    const siteKey = `vwap_${this.smaCallCounter++}`;
+    const src = args[0] as number; // typically hlc3
+    const bar = this.bars[this.currentBarIndex];
+    
+    if (!this.statefulFunctions.has(siteKey)) {
+      this.statefulFunctions.set(siteKey, { sumVol: 0, sumSrcVol: 0, lastSessionStart: 0 });
+    }
+    const state = this.statefulFunctions.get(siteKey);
+    
+    // Simplistic VWAP: reset daily (assuming session starts when day changes for this mockup)
+    const currentDay = new Date(bar.time).getDate();
+    if (state.lastSessionStart !== currentDay) {
+      state.sumVol = 0;
+      state.sumSrcVol = 0;
+      state.lastSessionStart = currentDay;
+    }
+    
+    state.sumVol += bar.volume;
+    state.sumSrcVol += (src * bar.volume);
+    
+    return state.sumVol === 0 ? src : state.sumSrcVol / state.sumVol;
+  }
+
+  private callDev(args: any[]): number | null {
+    const siteKey = `dev_${this.smaCallCounter++}`;
+    const src = args[0] as number;
+    const length = args[1] as number;
+    
+    if (!this.statefulFunctions.has(siteKey)) this.statefulFunctions.set(siteKey, { series: [] });
+    const state = this.statefulFunctions.get(siteKey);
+    if (state.series.length <= this.currentBarIndex) state.series.push(src);
+    
+    const values = state.series.slice(-length).filter((v: number | null): v is number => v !== null);
+    if (values.length < length) return null;
+    
+    const mean = values.reduce((a: number, b: number) => a + b, 0) / length;
+    const absDiffSum = values.reduce((a: number, b: number) => a + Math.abs(b - mean), 0);
+    return absDiffSum / length;
+  }
+
+  private callVariance(args: any[]): number | null {
+    const siteKey = `var_${this.smaCallCounter++}`;
+    const src = args[0] as number;
+    const length = Math.max(1, (args[1] as number) || 1);
+    
+    if (!this.statefulFunctions.has(siteKey)) this.statefulFunctions.set(siteKey, { series: [] });
+    const state = this.statefulFunctions.get(siteKey);
+    if (state.series.length <= this.currentBarIndex) state.series.push(src);
+    
+    const values = state.series.slice(-length).filter((v: number | null): v is number => v !== null);
+    if (values.length < length) return null;
+    
+    const mean = values.reduce((a: number, b: number) => a + b, 0) / length;
+    const sqDiffSum = values.reduce((a: number, b: number) => a + Math.pow(b - mean, 2), 0);
+    return sqDiffSum / length; // Pine's variance is population variance
+  }
+
+  private callStdev(args: any[]): number | null {
+    const variance = this.callVariance(args);
+    return variance !== null ? Math.sqrt(variance) : null;
+  }
+
+  private callCci(args: any[]): number | null {
+    const src = args[0] as number;
+    const length = args[1] as number;
+    const sma = this.callSma([src, length]);
+    const dev = this.callDev([src, length]);
+    
+    if (sma === null || dev === null || dev === 0) return null;
+    return (src - sma) / (0.015 * dev);
+  }
+
+  private callTr(args: any[]): number | null {
+    const handleNaN = args[0]; // passing true handles NaNs, omitted here for simplicity
+    const bar = this.bars[this.currentBarIndex];
+    const prevBar = this.currentBarIndex > 0 ? this.bars[this.currentBarIndex - 1] : null;
+    if (!prevBar) return bar.high - bar.low;
+    return Math.max(bar.high - bar.low, Math.abs(bar.high - prevBar.close), Math.abs(bar.low - prevBar.close));
+  }
+
+  private callRoc(args: any[]): number | null {
+    const siteKey = `roc_${this.smaCallCounter++}`;
+    const src = args[0] as number;
+    const length = (args[1] as number) || 14;
+    
+    if (!this.statefulFunctions.has(siteKey)) this.statefulFunctions.set(siteKey, { series: [] });
+    const state = this.statefulFunctions.get(siteKey);
+    if (state.series.length <= this.currentBarIndex) state.series.push(src);
+    
+    if (state.series.length <= length) return null;
+    const prior = state.series[this.currentBarIndex - length];
+    if (prior === 0 || prior === null) return null;
+    return ((src - prior) / prior) * 100;
+  }
+
+  private callWma(args: any[]): number | null {
+    const siteKey = `wma_${this.smaCallCounter++}`;
+    const src = args[0] as number;
+    const length = (args[1] as number) || 9;
+    
+    if (!this.statefulFunctions.has(siteKey)) this.statefulFunctions.set(siteKey, { series: [] });
+    const state = this.statefulFunctions.get(siteKey);
+    if (state.series.length <= this.currentBarIndex) state.series.push(src);
+    
+    const values = state.series.slice(-length).filter((v: number | null): v is number => v !== null);
+    if (values.length < length) return null;
+    
+    let norm = 0.0;
+    let sum = 0.0;
+    for (let i = 0; i < length; i++) {
+        const weight = (i + 1) * length;
+        norm += weight;
+        sum += values[i] * weight;
+    }
+    return sum / norm;
+  }
+
+  private callKc(args: any[]): [number | null, number | null, number | null] {
+    const series = args[0] as number;
+    const length = (args[1] as number) || 20;
+    const mult = (args[2] as number) || 2.0;
+    const useTrueRange = args[3] !== false; // defaults to true in TradingView
+    
+    const basis = this.callEma([series, length]);
+    let range = 0;
+    if (useTrueRange) {
+        range = this.callTr([]) as number;
+    } else {
+        const bar = this.bars[this.currentBarIndex];
+        range = bar.high - bar.low;
+    }
+    const rangeEma = this.callEma([range, length]);
+    
+    if (basis === null || rangeEma === null) return [null, null, null];
+    return [basis, basis + rangeEma * mult, basis - rangeEma * mult];
+  }
+
+  private callSupertrend(args: any[]): [number | null, number | null] {
+    const siteKey = `st_${this.smaCallCounter++}`;
+    const factor = (args[0] as number) || 3;
+    const atrPeriod = (args[1] as number) || 10;
+    
+    const atr = this.callAtr([atrPeriod]);
+    if (atr === null) return [null, null];
+    
+    const bar = this.bars[this.currentBarIndex];
+    const hl2 = (bar.high + bar.low) / 2;
+    const basicUpperband = hl2 + factor * atr;
+    const basicLowerband = hl2 - factor * atr;
+    
+    if (!this.statefulFunctions.has(siteKey)) {
+        this.statefulFunctions.set(siteKey, {
+           lowerBand: basicLowerband,
+           upperBand: basicUpperband,
+           supertrend: 0,
+           direction: 1 // 1 for long, -1 for short
+        });
+    }
+    
+    const state = this.statefulFunctions.get(siteKey);
+    const prevBar = this.currentBarIndex > 0 ? this.bars[this.currentBarIndex - 1] : null;
+    const prevClose = prevBar ? prevBar.close : bar.close;
+    
+    let lowerBand = basicLowerband;
+    if (basicLowerband < state.lowerBand && prevClose > state.lowerBand) {
+       lowerBand = state.lowerBand;
+    }
+    
+    let upperBand = basicUpperband;
+    if (basicUpperband > state.upperBand && prevClose < state.upperBand) {
+       upperBand = state.upperBand;
+    }
+    
+    let direction = state.direction;
+    if (direction === 1 && bar.close < lowerBand) direction = -1;
+    else if (direction === -1 && bar.close > upperBand) direction = 1;
+    
+    state.lowerBand = lowerBand;
+    state.upperBand = upperBand;
+    state.direction = direction;
+    state.supertrend = direction === 1 ? lowerBand : upperBand;
+    
+    return [state.supertrend, direction];
+  }
+  
+  private callRma(args: any[]): number | null {
+    const siteKey = `rma_${this.smaCallCounter++}`;
+    const val = args[0] as number;
+    const period = args[1] as number;
+    const alpha = 1 / period;
+    
+    if (!this.statefulFunctions.has(siteKey)) {
+      this.statefulFunctions.set(siteKey, { prev: null });
+    }
+    const state = this.statefulFunctions.get(siteKey);
+    let result = val;
+    if (state.prev !== null) {
+        result = alpha * val + (1 - alpha) * state.prev;
+    }
+    state.prev = result;
+    this.recordIndicator(siteKey, result);
+    return result;
+  }
+  
+  private callBb(args: any[]): [number|null, number|null, number|null] {
+     const series = args[0] as number;
+     const length = args[1] as number;
+     const mult = args[2] as number;
+     
+     const basis = this.callSma([series, length]);
+     const dev = this.callStdev([series, length]);
+     
+     if (basis === null || dev === null) return [null, null, null];
+     
+     return [basis, basis + mult * dev, basis - mult * dev];
+  }
+  
+  private callStoch(args: any[]): number | null {
+     const source = args[0] as number;
+     const high = args[1] as number;
+     const low = args[2] as number;
+     const length = args[3] as number;
+     
+     const highest = this.callWindow([high, length], 'highest');
+     const lowest = this.callWindow([low, length], 'lowest');
+     
+     if (highest === null || lowest === null || highest === lowest) return null;
+     
+     return 100 * (source - lowest) / (highest - lowest);
+  }
+  
+  private callHma(args: any[]): number | null {
+      // Mocking hma as wma for interpreter simplicity
+      return this.callWma(args);
   }
 }

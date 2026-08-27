@@ -3,6 +3,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import styles from './page.module.css';
 import { Backtester } from '@/lib/backtester/engine';
 import { StrategyTester, BacktestMetrics } from '@/components/StrategyTester';
@@ -539,11 +540,41 @@ export default function Home() {
 
   // Drawing State
   const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
-  const [userDrawings, setUserDrawings] = useState<{ type: string, points: any[] }[]>([]);
+  const [userDrawings, setUserDrawings] = useState<{ id?: string, type: string, points: any[] }[]>([]);
+  const [drawingsLoaded, setDrawingsLoaded] = useState(false);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('userDrawings');
+    if (stored) {
+      try {
+        setUserDrawings(JSON.parse(stored));
+      } catch (e) {}
+    }
+    setDrawingsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (drawingsLoaded) {
+      localStorage.setItem('userDrawings', JSON.stringify(userDrawings));
+    }
+  }, [userDrawings, drawingsLoaded]);
 
   // Native Indicators State
   const [showIndicatorModal, setShowIndicatorModal] = useState(false);
   const [activeNativeIndicators, setActiveNativeIndicators] = useState<string[]>([]);
+  const [hiddenIndicators, setHiddenIndicators] = useState<string[]>([]);
+  const [showMarketPanel, setShowMarketPanel] = useState(true);
+
+  useEffect(() => {
+    if (!showIndicatorModal && !showGoToModal) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setShowIndicatorModal(false);
+      setShowGoToModal(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showIndicatorModal, showGoToModal]);
 
   // --- Replay Playback ---
   useEffect(() => {
@@ -585,7 +616,10 @@ export default function Home() {
   }
 
   // Merge backtest indicators and native indicators
-  const mergedIndicatorSeries = { ...indicatorSeries, ...nativeSeries };
+  const mergedIndicatorSeries = Object.fromEntries(
+    Object.entries({ ...indicatorSeries, ...nativeSeries })
+      .filter(([key]) => !hiddenIndicators.includes(key))
+  );
   
   // Slice indicators for replay mode
   const visibleIndicatorSeries: Record<string, any[]> = {};
@@ -772,7 +806,8 @@ export default function Home() {
         <div className={styles.toolbarGroup}>
           {/* Symbol selector */}
           <div className={styles.brandLogo}>
-            <span style={{fontWeight: 900, fontSize: '1.2rem', letterSpacing: '-1px'}}>AG</span>
+            <span className={styles.brandMark}>PL</span>
+            <span className={styles.brandName}>PineLabs</span>
           </div>
           <div className={styles.toolbarDivider} />
           
@@ -846,6 +881,13 @@ export default function Home() {
         </button>
 
         <div className={styles.spacer} />
+
+        <Link href="/data-manager" className={styles.navBtn} title="Open Data Manager">
+          Data Manager
+        </Link>
+        <button className={styles.navBtn} onClick={() => setShowMarketPanel(value => !value)}>
+          {showMarketPanel ? 'Hide Panel' : 'Show Panel'}
+        </button>
 
         {/* Run Backtest */}
         <button
@@ -1080,18 +1122,69 @@ export default function Home() {
             </>
           )}
         </div>
+        {showMarketPanel && <aside className={styles.marketPanel} aria-label="Market data panel">
+          <div className={styles.marketPanelHeader}>
+            <span>MARKETS</span>
+            <Link href="/data-manager" className={styles.marketPanelLink}>Manage</Link>
+          </div>
+          <div className={styles.marketPanelSectionTitle}>Datasets</div>
+          {datasets.length === 0 ? (
+            <div className={styles.marketEmpty}>No datasets loaded</div>
+          ) : datasets.map(dataset => (
+            <button
+              key={dataset.id}
+              className={String(dataset.id) === selectedDatasetId ? styles.marketRowActive : styles.marketRow}
+              onClick={() => {
+                setSelectedDatasetId(String(dataset.id));
+                setViewTimeframe(dataset.timeframe);
+              }}
+            >
+              <span>
+                <strong>{dataset.symbol}</strong>
+                <small>{dataset.source_name} · {dataset.timeframe.toUpperCase()}</small>
+              </span>
+              <span className={styles.marketCount}>{dataset.candle_count.toLocaleString()}</span>
+            </button>
+          ))}
+          <div className={styles.marketPanelSectionTitle}>Active View</div>
+          <div className={styles.marketSummary}>
+            <span>Symbol <strong>{selectedDataset?.symbol || '—'}</strong></span>
+            <span>Interval <strong>{viewTimeframe.toUpperCase()}</strong></span>
+            <span>Bars <strong>{chartData.length.toLocaleString()}</strong></span>
+            <span>Signals <strong>{metrics?.num_trades ?? 0}</strong></span>
+          </div>
+          <div className={styles.marketPanelSectionTitle}>Indicators</div>
+          {Object.keys(mergedIndicatorSeries).length === 0 ? (
+            <div className={styles.marketEmpty}>No indicators applied</div>
+          ) : Object.keys(mergedIndicatorSeries).map(name => (
+            <div className={styles.indicatorRow} key={name}>
+              <span className={styles.indicatorName}>{name.replace('_', ' ')}</span>
+              <button className={styles.indicatorHide} onClick={() => setHiddenIndicators(prev => [...prev, name])}>Hide</button>
+              <button className={styles.indicatorRemove} onClick={() => {
+                setHiddenIndicators(prev => prev.filter(item => item !== name));
+                if (name.startsWith('SMA')) setActiveNativeIndicators(prev => prev.filter(item => item !== 'sma20'));
+                if (name.startsWith('EMA')) setActiveNativeIndicators(prev => prev.filter(item => item !== 'ema20'));
+                if (name.startsWith('BB')) setActiveNativeIndicators(prev => prev.filter(item => item !== 'bb'));
+              }}>×</button>
+            </div>
+          ))}
+          {hiddenIndicators.length > 0 && (
+            <button className={styles.showIndicators} onClick={() => setHiddenIndicators([])}>Show hidden ({hiddenIndicators.length})</button>
+          )}
+        </aside>}
       </div>
 
       {/* Indicator Modal */}
       {showIndicatorModal && (
-        <div className={styles.indicatorModal}>
-          <div className={styles.indicatorModalHeader}>
-            <h2>Indicators, Metrics & Strategies</h2>
-            <button className={styles.indicatorModalClose} onClick={() => setShowIndicatorModal(false)}>
-              <IconClose />
-            </button>
-          </div>
-          <div className={styles.indicatorList}>
+        <div className={styles.modalBackdrop} onClick={() => setShowIndicatorModal(false)}>
+          <div className={styles.indicatorModal} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.indicatorModalHeader}>
+              <h2>Indicators, Metrics & Strategies</h2>
+              <button className={styles.indicatorModalClose} onClick={() => setShowIndicatorModal(false)}>
+                <IconClose />
+              </button>
+            </div>
+            <div className={styles.indicatorList}>
             <div style={{ padding: '0 8px 8px', color: '#787b86', fontSize: '0.75rem', fontWeight: 600, letterSpacing: '0.5px' }}>BUILT-IN</div>
             {[
               { id: 'sma20', name: 'Simple Moving Average (20)' },
@@ -1105,7 +1198,10 @@ export default function Home() {
                   {isActive ? (
                     <button className={styles.indicatorRemoveBtn} onClick={() => setActiveNativeIndicators(prev => prev.filter(i => i !== ind.id))}>Remove</button>
                   ) : (
-                    <button className={styles.indicatorAddBtn} onClick={() => setActiveNativeIndicators(prev => [...prev, ind.id])}>Add</button>
+                    <button className={styles.indicatorAddBtn} onClick={() => {
+                      setActiveNativeIndicators(prev => [...prev, ind.id]);
+                      setHiddenIndicators(prev => prev.filter(name => !name.startsWith(ind.name.split(' ')[0])));
+                    }}>Add</button>
                   )}
                 </div>
               );
@@ -1128,6 +1224,7 @@ export default function Home() {
                   {isBacktesting ? 'Adding...' : 'Add'}
                 </button>
               )}
+            </div>
             </div>
           </div>
         </div>
